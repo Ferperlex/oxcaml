@@ -1,0 +1,5 @@
+(library
+ (name chinese_checkers_logic_library)
+ (libraries core)
+ (preprocess
+  (pps ppx_jane)))

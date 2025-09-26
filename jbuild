@@ -1,5 +1,5 @@
 (library (
-  (name tictactoe_test_library) (libraries (core tictactoe_logic_library))))
+  (name tictactoe_test_library) (libraries (core tictactoe_logic_library chinese_checkers_logic_library))))
 
 (enforce_style (
   (jbuild_sorter ())
