@@ -1,222 +1,122 @@
-/* ===== Reset & global layout ===== */
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
+/* Fill screen and center the game */
 html, body {
   margin: 0;
-  padding: 0;
+  height: 100%;
+}
+body {
   width: 100vw;
   height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f8fafc;
   overflow: hidden;
 }
 
-body {
-  /* Center the board and fill the viewport background */
-  display: grid;
-  place-items: center;
-  background: #0b0f14;            /* page backdrop */
-  color: #e6edf3;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-
-  /* Prevent text selection / mobile callouts */
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* ===== Game root and board ===== */
+/* Outer container with safe padding so nothing gets clipped */
 .game {
   position: relative;
-  /* Board is a responsive square that fits on any screen */
-  width: min(100vw, 100vh);
-  height: min(100vw, 100vh);
-  aspect-ratio: 1;
-  /* Subtle frame */
-  border-radius: 2vmin;
-  background: #0f1620;
-  box-shadow:
-    0 0 0 0.35vmin #0a111a inset,
-    0 0.6vmin 2vmin rgba(0,0,0,0.55);
+  width: 100vmin;
+  height: 100vmin;
+  max-width: 100vw;
+  max-height: 100vh;
+  padding: 2vmin;                /* avoids right/bottom cut */
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: auto 1fr;  /* HUD + board */
+  gap: 1vmin;
 }
 
-/* Head-up display container (Confirm/Cancel area) */
+/* HUD floats above, right-aligned */
 .hud {
-  position: absolute;
-  top: 1.25vmin;
-  left: 1.25vmin;
-  right: 1.25vmin;
+  position: relative;
+  z-index: 3;
   display: flex;
   justify-content: flex-end;
   align-items: center;
+}
+.hud__actions {
+  display: flex;
   gap: 0.75vmin;
-  z-index: 5;             /* above the board */
-  pointer-events: none;   /* buttons re-enable their own */
 }
 
-/* ===== Buttons (Confirm / Cancel) ===== */
-.btn {
-  pointer-events: auto;
-  appearance: none;
-  border: none;
-  border-radius: 1.2vmin;
-  padding: 0.7vmin 1.6vmin;
-  font-size: 1.6vmin;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
-  color: #0b0f14;
-  background: #c9d1d9;
-  box-shadow:
-    0 0 0 0.25vmin rgba(255,255,255,0.06) inset,
-    0 0.4vmin 0.9vmin rgba(0,0,0,0.35);
-}
-.btn:hover { transform: translateY(-0.1vmin); }
-.btn:active { transform: translateY(0); }
-
-.btn--confirm {
-  background: #2ecc71; /* green */
-}
-.btn--cancel {
-  background: #e74c3c; /* red */
-}
-
-/* Disabled style (if you want to disable Confirm when path < 2) */
-.btn[disabled] {
-  opacity: 0.45;
-  cursor: default;
-  transform: none;
-}
-
-/* ===== Board canvas ===== */
+/* Square board */
 .board {
-  position: absolute;
-  inset: 1.2vmin;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1;
+  overflow: visible;
   border-radius: 2vmin;
-  overflow: hidden;  /* keep everything inside rounded corners */
-  /* Subtle panel gradient + vignette */
-  background:
-    radial-gradient(120% 120% at 50% 40%, #0f1a26 0%, #0f1620 55%, #0b0f14 100%);
+  background: radial-gradient(70% 70% at 50% 50%, #ffffff, #f1f5f9);
+  box-shadow:
+    0 0.5vmin 1vmin rgba(0,0,0,0.06),
+    inset 0 0 0.5vmin rgba(255,255,255,0.5);
 }
 
-/* ===== Cells (one per hex) ===== */
-/* Cells are absolutely positioned by JS; we render a circular "spot" using ::before */
+/* Cells are rendered as circles; final size set inline via style */
 .cell {
   position: absolute;
-  /* JS sets left/top/width/height as %, so no additional sizing here */
-  /* For hit-testing (helpful on mobile) */
-  cursor: default;
-}
-
-/* Base neutral spot (a circle drawn inside each cell) */
-.cell::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  /* Circular spot sized a bit smaller than the hex bounding box to avoid overlap */
-  width: 68%;
-  height: 68%;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: radial-gradient(circle at 55% 45%, #1a2430 0%, #121a24 70%, #0f1620 100%);
-  box-shadow:
-    0 0 0 0.18vmin rgba(255,255,255,0.06) inset,
-    0 0 0.65vmin rgba(0,0,0,0.45);
-  transition: box-shadow 120ms ease, background 120ms ease, transform 120ms ease, opacity 120ms ease;
-  opacity: 0.9;
+  background: #e2e8f0;
+  box-shadow: inset 0 0.3vmin 0.6vmin rgba(0,0,0,0.08);
+}
+.cell--alt { background: #e9eef5; }
+
+/* Highlight "next step" cells you can click */
+.cell--next {
+  outline: 0.45vmin solid #94a3b8;
+  cursor: pointer;
+}
+.cell--next:hover {
+  outline-color: #475569;
 }
 
-/* A subtle alternation for readability (optional) */
-.cell.cell--alt::before {
-  background: radial-gradient(circle at 55% 45%, #18212c 0%, #111825 70%, #0e1520 100%);
-}
-
-/* Legal NEXT steps highlight (when a piece is selected) */
-.cell.cell--legal::before {
-  box-shadow:
-    0 0 0 0.28vmin rgba(255,255,255,0.12) inset,
-    0 0 0 0.45vmin rgba(0, 186, 255, 0.25),
-    0 0 0.9vmin rgba(0, 186, 255, 0.18);
-  background: radial-gradient(circle at 55% 45%, #1b2b3a 0%, #14212f 70%, #0f1620 100%);
-}
-
-/* ===== Zone tinting (start/goal) via a soft ring on the spot) ===== */
-.cell[class*="cell--start-"]::before,
-.cell[class*="cell--goal-"]::before {
-  /* add a second inner ring using an inset shadow; each color below adjusts it */
-  box-shadow:
-    0 0 0 0.22vmin rgba(255,255,255,0.08) inset,
-    0 0 0.8vmin rgba(0,0,0,0.35);
-}
-
-/* Player tint colors (start/goal) — very subtle */
-.cell--start-A::before { outline: 0.35vmin solid rgba(231, 76, 60, 0.15); outline-offset: -0.35vmin; }
-.cell--goal-A::before  { outline: 0.35vmin solid rgba(231, 76, 60, 0.22); outline-offset: -0.35vmin; }
-
-.cell--start-B::before { outline: 0.35vmin solid rgba(52, 152, 219, 0.15); outline-offset: -0.35vmin; }
-.cell--goal-B::before  { outline: 0.35vmin solid rgba(52, 152, 219, 0.22); outline-offset: -0.35vmin; }
-
-.cell--start-C::before { outline: 0.35vmin solid rgba(46, 204, 113, 0.15); outline-offset: -0.35vmin; }
-.cell--goal-C::before  { outline: 0.35vmin solid rgba(46, 204, 113, 0.22); outline-offset: -0.35vmin; }
-
-.cell--start-D::before { outline: 0.35vmin solid rgba(241, 196, 15, 0.15); outline-offset: -0.35vmin; }
-.cell--goal-D::before  { outline: 0.35vmin solid rgba(241, 196, 15, 0.22); outline-offset: -0.35vmin; }
-
-.cell--start-E::before { outline: 0.35vmin solid rgba(155, 89, 182, 0.15); outline-offset: -0.35vmin; }
-.cell--goal-E::before  { outline: 0.35vmin solid rgba(155, 89, 182, 0.22); outline-offset: -0.35vmin; }
-
-.cell--start-F::before { outline: 0.35vmin solid rgba(230, 126, 34, 0.15); outline-offset: -0.35vmin; }
-.cell--goal-F::before  { outline: 0.35vmin solid rgba(230, 126, 34, 0.22); outline-offset: -0.35vmin; }
-
-/* ===== Pieces ===== */
+/* Pieces (overlaid inside a cell) */
 .piece {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 64%;
-  height: 64%;
+  width: 70%;
+  height: 70%;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: #b8c2cc; /* default fill (overridden per-player below) */
   box-shadow:
-    0 0 0 0.22vmin rgba(255,255,255,0.25) inset,
-    0 0.45vmin 0.9vmin rgba(0,0,0,0.55);
-  transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+    0 0.6vmin 1.2vmin rgba(0,0,0,0.15),
+    inset 0 0.4vmin 0.8vmin rgba(255,255,255,0.5);
+}
+
+/* Player colors */
+.piece--A { background: #0ea5e9; }  /* sky */
+.piece--B { background: #f97316; }  /* orange */
+.piece--C { background: #22c55e; }  /* green */
+.piece--D { background: #eab308; }  /* yellow */
+.piece--E { background: #a855f7; }  /* purple */
+.piece--F { background: #ef4444; }  /* red */
+
+/* Overlay when moving */
+.piece--moving {
+  box-shadow:
+    0 0.6vmin 1.2vmin rgba(0,0,0,0.18),
+    0 0 1.2vmin 0.2vmin rgba(14,165,233,0.35),
+    inset 0 0.4vmin 0.8vmin rgba(255,255,255,0.55);
+}
+
+/* Buttons */
+.btn {
+  padding: 0.6vmin 1.4vmin;
+  border-radius: 1.2vmin;
+  border: none;
+  font-size: min(2.6vmin, 16px);
+  font-weight: 600;
+  background: #e2e8f0;
+  color: #0f172a;
+  box-shadow: 0 0.4vmin 0.8vmin rgba(0,0,0,0.08);
+  cursor: pointer;
+}
+.btn[disabled] {
+  opacity: 0.45;
   cursor: default;
 }
-
-/* Ensure per-player colors override base .piece */
-.piece.piece--A { background: #e74c3c !important; } /* red */
-.piece.piece--B { background: #3498db !important; } /* blue */
-.piece.piece--C { background: #2ecc71 !important; } /* green */
-.piece.piece--D { background: #f1c40f !important; } /* yellow */
-.piece.piece--E { background: #9b59b6 !important; } /* purple */
-.piece.piece--F { background: #e67e22 !important; } /* orange */
-
-/* Clickable piece (your own on your turn) */
-.piece--clickable {
-  cursor: pointer;
-  filter: drop-shadow(0 0 0.5vmin rgba(255,255,255,0.1));
-}
-.piece--clickable:hover {
-  transform: translate(-50%, -50%) scale(1.05);
-}
-
-/* Selected piece ring/glow */
-.piece--selected {
-  box-shadow:
-    0 0 0 0.22vmin rgba(255,255,255,0.33) inset,
-    0 0 0 0.45vmin rgba(0, 186, 255, 0.45),
-    0 0.6vmin 1.2vmin rgba(0,0,0,0.6);
-  transform: translate(-50%, -50%) scale(1.06);
-}
-
-/* ===== Accessibility / misc ===== */
-:focus { outline: none; }
-[disabled] { pointer-events: none; }
+.btn--confirm { background: #10b981; color: white; }
+.btn--cancel  { background: #ef4444; color: white; }

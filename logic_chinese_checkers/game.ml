@@ -292,6 +292,7 @@ module Game_state = struct
     ; hops : Cell_position.t list
     }
 
+  (* ---------- UI helper: legal NEXT steps for an in-progress path ---------- *)
   let next_steps_from_path (st : t) ~(path : Cell_position.t list) : Cell_position.t list =
     match st.decision with
     | Winner _ -> []
@@ -299,10 +300,22 @@ module Game_state = struct
       (match path with
        | [] -> []
        | start :: _ ->
-         (* Ensure the path starts on a piece belonging to side-to-move. *)
+         (* Path must start on a piece of the side to move *)
          (match Map.find st.board start with
           | Some (Some owner) when Player_kind.equal owner whose_turn ->
-            let curr = last_exn path in
+            let curr =
+              match List.last path with
+              | Some x -> x
+              | None -> start
+            in
+            let last_seg_is_adjacent =
+              match List.rev path with
+              | _ :: prev :: _ ->
+                (match step_kind ~from_:prev ~to_:curr with
+                 | `Adjacent -> true
+                 | _ -> false)
+              | _ -> false
+            in
             let hops_from (pos : Cell_position.t) : Cell_position.t list =
               directions
               |> List.filter_map ~f:(fun (dq, dr) ->
@@ -310,35 +323,31 @@ module Game_state = struct
                 let jump = neighbor pos (2 * dq, 2 * dr) in
                 match occupied st.board mid, landing_empty st.board jump with
                 | `Occupied, `Empty ->
-                  (* avoid revisiting cells within the same path *)
-                  (match List.mem path jump ~equal:pos_equal with
-                   | true -> None
-                   | false -> Some jump)
+                  if List.mem path jump ~equal:pos_equal then None else Some jump
                 | _ -> None)
             in
-            (match path with
-             | [ _only_start ] ->
-               (* From start: allow either an adjacent final step or a first hop *)
-               let adj =
-                 directions
-                 |> List.filter_map ~f:(fun dir ->
-                   let dst = neighbor curr dir in
-                   match landing_empty st.board dst with
-                   | `Empty ->
-                     (* Adjacent implies the move would end here; enforce the final-landing rule now. *)
-                     (match is_forbidden_landing st whose_turn dst with
-                      | true -> None
-                      | false -> Some dst)
-                   | _ -> None)
-               in
-               let hops = hops_from curr in
-               List.dedup_and_sort ~compare:Cell_position.compare (adj @ hops)
-             | _ ->
-               (* Already hopped at least once: can only continue hopping *)
-               hops_from curr |> List.dedup_and_sort ~compare:Cell_position.compare)
-          | _ ->
-            (* Path doesn’t start on a legal piece; offer nothing. *)
-            []))
+            if List.length path = 1
+            then (
+              (* First click: adjacent finals + first hops *)
+              let adj =
+                directions
+                |> List.filter_map ~f:(fun dir ->
+                  let dst = neighbor curr dir in
+                  match landing_empty st.board dst with
+                  | `Empty ->
+                    if is_forbidden_landing st whose_turn dst then None else Some dst
+                  | _ -> None)
+              in
+              let hops = hops_from curr in
+              List.dedup_and_sort ~compare:Cell_position.compare (adj @ hops))
+            else if last_seg_is_adjacent
+            then
+              (* Adjacent step chosen → must stop; no extensions *)
+              []
+            else
+              (* In a hop chain → only further hops *)
+              hops_from curr |> List.dedup_and_sort ~compare:Cell_position.compare
+          | _ -> []))
   ;;
 
   let next_step_options (st : t) ~(start : Cell_position.t) ~(path : Cell_position.t list)
