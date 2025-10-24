@@ -8,7 +8,7 @@ module Player_kind = struct
     | D
     | E
     | F
-  [@@deriving sexp]
+  [@@deriving sexp, equal]
 end
 
 module Cell_position = struct
@@ -32,20 +32,7 @@ module Decision = struct
 end
 
 module Move = struct
-  (* A move must visit at least two cells. We model this as a non-empty list
-  with at least one "next" cell after the starting cell. *)
-  type t = Cell_position.t list
-
-  let create lst =
-    match lst with
-    | _first :: _second :: _rest ->
-      (match List.find_a_dup lst ~compare:Poly.compare with
-       | Some dup ->
-         Or_error.error_s
-           [%message "Move contains duplicate cell positions" (dup : Cell_position.t)]
-       | None -> Ok lst)
-    | _ -> Or_error.error_s [%message "Move must have at least two positions"]
-  ;;
+  type t = Cell_position.t list [@@deriving sexp, compare]
 end
 
 module Game_state = struct
@@ -53,7 +40,9 @@ module Game_state = struct
     { board : Player_kind.t option Cell_position.Map.t
     ; number_of_players : int
     ; decision : Decision.t
+    ; goals : (Player_kind.t * Cell_position.t list) list
     }
+  [@@deriving sexp]
 
   let create_empty_board () =
     let valid q r =
@@ -79,9 +68,10 @@ module Game_state = struct
       Map.set acc ~key ~data:None)
   ;;
 
-  (* Helpers to construct triangles at each of the six star tips *)
-  let invert_coordinate_signs cell_positions =
-    List.map cell_positions ~f:(fun { Cell_position.q_coordinate; r_coordinate } ->
+  (* ---------- tip triangles (lists) ---------- *)
+
+  let invert_coordinate_signs cells =
+    List.map cells ~f:(fun { Cell_position.q_coordinate; r_coordinate } ->
       { Cell_position.q_coordinate = -q_coordinate; r_coordinate = -r_coordinate })
   ;;
 
@@ -116,61 +106,695 @@ module Game_state = struct
   ;;
 
   let tri_neg_s () = invert_coordinate_signs (tri_pos_s ())
+  let qpos = tri_pos_q ()
+  let qneg = tri_neg_q ()
+  let rpos = tri_pos_r ()
+  let rneg = tri_neg_r ()
+  let spos = tri_pos_s ()
+  let sneg = tri_neg_s ()
+
+  let players_in_game (n : int) : Player_kind.t list =
+    match n with
+    | 2 -> [ Player_kind.A; Player_kind.B ]
+    | 3 -> [ Player_kind.A; Player_kind.B; Player_kind.C ]
+    | 4 -> [ Player_kind.A; Player_kind.B; Player_kind.C; Player_kind.D ]
+    | 6 ->
+      [ Player_kind.A
+      ; Player_kind.B
+      ; Player_kind.C
+      ; Player_kind.D
+      ; Player_kind.E
+      ; Player_kind.F
+      ]
+    | _ -> []
+  ;;
+
+  let start_triangle_for_player ~(number_of_players : int) (p : Player_kind.t)
+    : Cell_position.t list
+    =
+    match number_of_players, p with
+    | 2, Player_kind.A -> qpos
+    | 2, Player_kind.B -> qneg
+    | 3, Player_kind.A -> qpos
+    | 3, Player_kind.B -> rpos
+    | 3, Player_kind.C -> spos
+    | 4, Player_kind.A -> qpos
+    | 4, Player_kind.B -> rpos
+    | 4, Player_kind.C -> qneg
+    | 4, Player_kind.D -> rneg
+    | 6, Player_kind.A -> qpos
+    | 6, Player_kind.B -> sneg
+    | 6, Player_kind.C -> rpos
+    | 6, Player_kind.D -> qneg
+    | 6, Player_kind.E -> spos
+    | 6, Player_kind.F -> rneg
+    | _, _ -> []
+  ;;
+
+  let goal_triangle_for_player ~(number_of_players : int) (p : Player_kind.t)
+    : Cell_position.t list
+    =
+    match number_of_players, p with
+    | 2, Player_kind.A -> qneg
+    | 2, Player_kind.B -> qpos
+    | 3, Player_kind.A -> qneg
+    | 3, Player_kind.B -> rneg
+    | 3, Player_kind.C -> sneg
+    | 4, Player_kind.A -> qneg
+    | 4, Player_kind.B -> rneg
+    | 4, Player_kind.C -> qpos
+    | 4, Player_kind.D -> rpos
+    | 6, Player_kind.A -> qneg
+    | 6, Player_kind.B -> spos
+    | 6, Player_kind.C -> rneg
+    | 6, Player_kind.D -> qpos
+    | 6, Player_kind.E -> sneg
+    | 6, Player_kind.F -> rpos
+    | _, _ -> []
+  ;;
 
   let place_starting_positions ~board ~player ~cells =
     List.fold cells ~init:board ~f:(fun acc key -> Map.set acc ~key ~data:(Some player))
   ;;
 
   let populate_starting_positions ~number_of_players empty_board =
-    let qpos = tri_pos_q ()
-    and qneg = tri_neg_q ()
-    and rpos = tri_pos_r ()
-    and rneg = tri_neg_r ()
-    and spos = tri_pos_s ()
-    and sneg = tri_neg_s () in
-    let assign pattern =
-      List.fold pattern ~init:empty_board ~f:(fun board (player, cells) ->
-        place_starting_positions ~board ~player ~cells)
-    in
-    match number_of_players with
-    | 2 -> assign [ Player_kind.A, qpos; Player_kind.B, qneg ]
-    | 3 -> assign [ Player_kind.A, qpos; Player_kind.B, rpos; Player_kind.C, spos ]
-    | 4 ->
-      assign
-        [ Player_kind.A, qpos
-        ; Player_kind.B, rpos
-        ; Player_kind.C, qneg
-        ; Player_kind.D, rneg
-        ]
-    | 6 ->
-      assign
-        [ Player_kind.A, qpos
-        ; Player_kind.B, sneg
-        ; Player_kind.C, rpos
-        ; Player_kind.D, qneg
-        ; Player_kind.E, spos
-        ; Player_kind.F, rneg
-        ]
-    | _ ->
-      failwith
-        "invalid number of players has already been checked, this should never raise"
+    players_in_game number_of_players
+    |> List.fold ~init:empty_board ~f:(fun b p ->
+      place_starting_positions
+        ~board:b
+        ~player:p
+        ~cells:(start_triangle_for_player ~number_of_players p))
+  ;;
+
+  let compute_goals ~(number_of_players : int)
+    : (Player_kind.t * Cell_position.t list) list
+    =
+    players_in_game number_of_players
+    |> List.map ~f:(fun p -> p, goal_triangle_for_player ~number_of_players p)
+  ;;
+
+  let goals_for (st : t) (p : Player_kind.t) : Cell_position.t list =
+    List.Assoc.find_exn st.goals ~equal:Player_kind.equal p
+  ;;
+
+  let forbidden_for (st : t) (p : Player_kind.t) : Cell_position.t list =
+    st.goals
+    |> List.filter ~f:(fun (q, _) -> not (Player_kind.equal p q))
+    |> List.concat_map ~f:snd
   ;;
 
   let create ~number_of_players =
-    let number_of_players_ok =
-      match number_of_players with
-      (* 5 players not possible *)
-      | 2 | 3 | 4 | 6 -> true
-      | _ -> false
-    in
-    match number_of_players_ok with
-    | false -> Or_error.error_s [%message "Invalid number of players"]
-    | true ->
+    match number_of_players with
+    | (2 | 3 | 4 | 6) as n ->
       let empty_board = create_empty_board () in
+      let board = populate_starting_positions ~number_of_players:n empty_board in
+      let goals = compute_goals ~number_of_players:n in
       Ok
-        { board = populate_starting_positions ~number_of_players empty_board
-        ; number_of_players
-        ; decision = In_progress { whose_turn = A }
+        { board
+        ; number_of_players = n
+        ; decision = In_progress { whose_turn = Player_kind.A }
+        ; goals
         }
+    | _ -> Or_error.error_s [%message "Invalid number of players"]
+  ;;
+
+  let directions : (int * int) list = [ 1, 0; 0, 1; -1, 1; -1, 0; 0, -1; 1, -1 ]
+  let double_directions = List.map directions ~f:(fun (dq, dr) -> 2 * dq, 2 * dr)
+
+  let neighbor (pos : Cell_position.t) (dq, dr) : Cell_position.t =
+    { Cell_position.q_coordinate = pos.q_coordinate + dq
+    ; r_coordinate = pos.r_coordinate + dr
+    }
+  ;;
+
+  let step_kind ~(from_ : Cell_position.t) ~(to_ : Cell_position.t) =
+    let dq = to_.q_coordinate - from_.q_coordinate in
+    let dr = to_.r_coordinate - from_.r_coordinate in
+    match List.mem directions (dq, dr) ~equal:Poly.equal with
+    | true -> `Adjacent
+    | false ->
+      (match List.mem double_directions (dq, dr) ~equal:Poly.equal with
+       | true ->
+         let mid =
+           { Cell_position.q_coordinate = from_.q_coordinate + (dq / 2)
+           ; r_coordinate = from_.r_coordinate + (dr / 2)
+           }
+         in
+         `Hop_over mid
+       | false -> `Invalid)
+  ;;
+
+  let landing_empty (board : Player_kind.t option Cell_position.Map.t) key =
+    match Map.find board key with
+    | Some None -> `Empty
+    | Some (Some _) -> `Occupied
+    | None -> `Off_board
+  ;;
+
+  let occupied (board : Player_kind.t option Cell_position.Map.t) key =
+    match Map.find board key with
+    | Some (Some _) -> `Occupied
+    | Some None -> `Empty
+    | None -> `Off_board
+  ;;
+
+  let adjacent_pairs (xs : 'a list) : ('a * 'a) list =
+    let rec go acc = function
+      | x :: (y :: _ as rest) -> go ((x, y) :: acc) rest
+      | _ -> List.rev acc
+    in
+    go [] xs
+  ;;
+
+  let last_exn (xs : 'a list) : 'a =
+    match List.last xs with
+    | Some x -> x
+    | None -> failwith "impossible: empty move after prior checks"
+  ;;
+
+  let pos_equal a b = Int.equal (Cell_position.compare a b) 0
+  let pos_mem lst x = List.mem lst x ~equal:pos_equal
+
+  (* Final-landing rule with exception:
+     - forbidden if in an opponent's goal
+     - allowed if that hex is also in the mover's own start triangle *)
+  let is_forbidden_landing (st : t) (p : Player_kind.t) (dest : Cell_position.t) : bool =
+    match
+      pos_mem (start_triangle_for_player ~number_of_players:st.number_of_players p) dest
+    with
+    | true -> false
+    | false -> pos_mem (forbidden_for st p) dest
+  ;;
+
+  let is_move_valid (st : t) (mv : Move.t) : unit Or_error.t =
+    match mv with
+    | [] | [ _ ] -> Or_error.error_s [%message "Move must have at least two positions"]
+    | start :: _ ->
+      (match Map.find st.board start with
+       | None ->
+         Or_error.error_s
+           [%message "Starting position not on board" (start : Cell_position.t)]
+       | Some None ->
+         Or_error.error_s
+           [%message "Starting position is empty" (start : Cell_position.t)]
+       | Some (Some owner) ->
+         (match st.decision with
+          | Winner _ -> Or_error.error_s [%message "Game is already over"]
+          | In_progress { whose_turn } ->
+            (match Player_kind.equal owner whose_turn with
+             | false ->
+               Or_error.error_s
+                 [%message
+                   "It's not that player's turn"
+                     (owner : Player_kind.t)
+                     (whose_turn : Player_kind.t)]
+             | true ->
+               let segments = adjacent_pairs mv in
+               (match segments with
+                | [] -> Ok ()
+                | (a, b) :: rest ->
+                  (match step_kind ~from_:a ~to_:b with
+                   | `Invalid ->
+                     Or_error.error_s
+                       [%message
+                         "First segment is not adjacent or a valid hop"
+                           (a : Cell_position.t)
+                           (b : Cell_position.t)]
+                   | `Adjacent ->
+                     (match rest with
+                      | _ :: _ ->
+                        Or_error.error_s
+                          [%message "Cannot combine step with hops in one move"]
+                      | [] ->
+                        (match landing_empty st.board b with
+                         | `Empty ->
+                           (match is_forbidden_landing st whose_turn b with
+                            | true ->
+                              Or_error.error_s
+                                [%message
+                                  "Cannot land in an opponent's goal"
+                                    (b : Cell_position.t)]
+                            | false -> Ok ())
+                         | `Occupied ->
+                           Or_error.error_s
+                             [%message "Landing cell is occupied" (b : Cell_position.t)]
+                         | `Off_board ->
+                           Or_error.error_s
+                             [%message
+                               "Landing cell is off the board" (b : Cell_position.t)]))
+                   | `Hop_over _ ->
+                     let check_segment (from_, to_) =
+                       match step_kind ~from_ ~to_ with
+                       | `Adjacent ->
+                         Or_error.error_s
+                           [%message
+                             "Cannot include an adjacent step in a hop sequence"
+                               (from_ : Cell_position.t)
+                               (to_ : Cell_position.t)]
+                       | `Invalid ->
+                         Or_error.error_s
+                           [%message
+                             "Segment is not a valid hop"
+                               (from_ : Cell_position.t)
+                               (to_ : Cell_position.t)]
+                       | `Hop_over mid ->
+                         (match occupied st.board mid with
+                          | `Occupied ->
+                            (match landing_empty st.board to_ with
+                             | `Empty -> Ok ()
+                             | `Occupied ->
+                               Or_error.error_s
+                                 [%message
+                                   "Landing cell is occupied" (to_ : Cell_position.t)]
+                             | `Off_board ->
+                               Or_error.error_s
+                                 [%message
+                                   "Landing cell is off the board" (to_ : Cell_position.t)])
+                          | `Empty ->
+                            Or_error.error_s
+                              [%message
+                                "Must hop over an occupied piece" (mid : Cell_position.t)]
+                          | `Off_board ->
+                            Or_error.error_s
+                              [%message
+                                "Mid cell is off the board" (mid : Cell_position.t)])
+                     in
+                     Or_error.combine_errors_unit
+                       (List.map ((a, b) :: rest) ~f:check_segment)
+                     |> Or_error.bind ~f:(fun () ->
+                       let last = last_exn mv in
+                       match is_forbidden_landing st whose_turn last with
+                       | true ->
+                         Or_error.error_s
+                           [%message
+                             "Cannot land in an opponent's goal" (last : Cell_position.t)]
+                       | false -> Ok ()))))))
+  ;;
+
+  let has_full_goal_for (st : t) (p : Player_kind.t) : bool =
+    let goal_cells = goals_for st p in
+    List.for_all goal_cells ~f:(fun pos ->
+      match Map.find st.board pos with
+      | Some (Some who) -> Player_kind.equal who p
+      | _ -> false)
+  ;;
+
+  let has_any_legal_moves (st : t) : bool =
+    match st.decision with
+    | Decision.Winner _ -> false
+    | Decision.In_progress { whose_turn } ->
+      let any_step_from (start : Cell_position.t) : bool =
+        let rec loop = function
+          | [] -> false
+          | (dq, dr) :: rest ->
+            let dst = neighbor start (dq, dr) in
+            (match landing_empty st.board dst with
+             | `Empty ->
+               (match is_forbidden_landing st whose_turn dst with
+                | false -> true
+                | true -> loop rest)
+             | _ -> loop rest)
+        in
+        loop directions
+      in
+      (* DFS for at-least-one legal hop chain, no revisits along path. *)
+      let rec any_hop_from ~(curr : Cell_position.t) ~(visited : Cell_position.t list)
+        : bool
+        =
+        let rec dirs = function
+          | [] -> false
+          | (dq, dr) :: rest ->
+            let mid = neighbor curr (dq, dr) in
+            let jump = neighbor curr (2 * dq, 2 * dr) in
+            let can_hop =
+              match Map.find st.board mid, Map.find st.board jump with
+              | Some (Some _), Some None -> true
+              | _ -> false
+            in
+            (match can_hop, List.mem visited jump ~equal:pos_equal with
+             | true, false ->
+               (match is_forbidden_landing st whose_turn jump with
+                | false -> true
+                | true ->
+                  let visited' = jump :: visited in
+                  (match any_hop_from ~curr:jump ~visited:visited' with
+                   | true -> true
+                   | false -> dirs rest))
+             | _ -> dirs rest)
+        in
+        dirs directions
+      in
+      let my_positions =
+        Map.to_alist st.board
+        |> List.filter_map ~f:(fun (pos, occ) ->
+          match occ with
+          | Some who when Player_kind.equal who whose_turn -> Some pos
+          | _ -> None)
+      in
+      let rec scan = function
+        | [] -> false
+        | pos :: rest ->
+          (match any_step_from pos with
+           | true -> true
+           | false ->
+             (match any_hop_from ~curr:pos ~visited:[ pos ] with
+              | true -> true
+              | false -> scan rest))
+      in
+      scan my_positions
+  ;;
+
+  let single_steps_from (st : t) (start : Cell_position.t) : Move.t list =
+    directions
+    |> List.filter_map ~f:(fun dir ->
+      let dst = neighbor start dir in
+      match Map.find st.board dst with
+      | Some None -> Some [ start; dst ]
+      | _ -> None)
+  ;;
+
+  let hop_sequences_from (st : t) (start : Cell_position.t) : Move.t list =
+    let rec dfs (path : Cell_position.t list) acc =
+      let curr =
+        match List.last path with
+        | Some x -> x
+        | None -> (* shouldn't happen *) failwith "empty hop path"
+      in
+      let hops =
+        directions
+        |> List.filter_map ~f:(fun (dq, dr) ->
+          let mid = neighbor curr (dq, dr) in
+          let jump = neighbor curr (2 * dq, 2 * dr) in
+          match Map.find st.board mid, Map.find st.board jump with
+          | Some (Some _), Some None when not (List.mem path jump ~equal:pos_equal) ->
+            Some jump
+          | _ -> None)
+      in
+      List.fold hops ~init:acc ~f:(fun acc jump ->
+        let path' = path @ [ jump ] in
+        let acc' = path' :: acc in
+        dfs path' acc')
+    in
+    dfs [ start ] [] |> List.filter ~f:(fun p -> List.length p >= 2)
+  ;;
+
+  let all_legal_moves (st : t) : Move.t list =
+    match st.decision with
+    | Winner _ -> []
+    | In_progress { whose_turn } ->
+      let my_positions =
+        Map.to_alist st.board
+        |> List.filter_map ~f:(fun (pos, occ) ->
+          match occ with
+          | Some who when Player_kind.equal who whose_turn -> Some pos
+          | _ -> None)
+      in
+      let candidates =
+        List.concat_map my_positions ~f:(single_steps_from st)
+        @ List.concat_map my_positions ~f:(hop_sequences_from st)
+      in
+      List.filter_map candidates ~f:(fun mv ->
+        match is_move_valid st mv with
+        | Ok () -> Some mv
+        | Error _ -> None)
+      |> List.dedup_and_sort ~compare:(List.compare Cell_position.compare)
+  ;;
+
+  let next_player ~(n : int) (p : Player_kind.t) : Player_kind.t =
+    match n, p with
+    | 2, Player_kind.A -> Player_kind.B
+    | 2, Player_kind.B -> Player_kind.A
+    | 3, Player_kind.A -> Player_kind.B
+    | 3, Player_kind.B -> Player_kind.C
+    | 3, Player_kind.C -> Player_kind.A
+    | 4, Player_kind.A -> Player_kind.B
+    | 4, Player_kind.B -> Player_kind.C
+    | 4, Player_kind.C -> Player_kind.D
+    | 4, Player_kind.D -> Player_kind.A
+    | 6, Player_kind.A -> Player_kind.B
+    | 6, Player_kind.B -> Player_kind.C
+    | 6, Player_kind.C -> Player_kind.D
+    | 6, Player_kind.D -> Player_kind.E
+    | 6, Player_kind.E -> Player_kind.F
+    | 6, Player_kind.F -> Player_kind.A
+    | _, p -> p
+  ;;
+
+  let skip_turn (st : t) : t =
+    match st.decision with
+    | Decision.Winner _ -> st
+    | Decision.In_progress { whose_turn } ->
+      let nxt = next_player ~n:st.number_of_players whose_turn in
+      { st with decision = Decision.In_progress { whose_turn = nxt } }
+  ;;
+
+  let make_move (st : t) (mv : Move.t) : t Or_error.t =
+    match is_move_valid st mv with
+    | Error _ as e -> e
+    | Ok () ->
+      (match mv, st.decision with
+       | (start :: _ as path), In_progress { whose_turn } ->
+         let last = last_exn path in
+         let board' =
+           Map.set
+             (Map.set st.board ~key:start ~data:None)
+             ~key:last
+             ~data:(Some whose_turn)
+         in
+         let st' = { st with board = board' } in
+         let decision' =
+           match has_full_goal_for st' whose_turn with
+           | true -> Decision.Winner whose_turn
+           | false ->
+             In_progress { whose_turn = next_player ~n:st.number_of_players whose_turn }
+         in
+         Ok { st' with decision = decision' }
+       | _, _ -> Or_error.error_s [%message "Move must have at least two positions"])
+  ;;
+end
+
+module Ai = struct
+  (* ---------- distance & small helpers ---------- *)
+
+  let hex_distance (a : Cell_position.t) (b : Cell_position.t) : int =
+    let dq = b.q_coordinate - a.q_coordinate in
+    let dr = b.r_coordinate - a.r_coordinate in
+    let ds = -(dq + dr) in
+    (Int.abs dq + Int.abs dr + Int.abs ds) / 2
+  ;;
+
+  let pos_equal a b = Int.equal (Cell_position.compare a b) 0
+
+  let remove_one ~equal x xs =
+    let rec go acc = function
+      | [] -> List.rev acc
+      | y :: ys when equal x y -> List.rev_append acc ys
+      | y :: ys -> go (y :: acc) ys
+    in
+    go [] xs
+  ;;
+
+  (* “outer ring first” for a goal triangle: larger ring index = farther out *)
+  let ring_index (p : Cell_position.t) =
+    let q = p.q_coordinate
+    and r = p.r_coordinate in
+    let s = -q - r in
+    Int.max (Int.abs q) (Int.max (Int.abs r) (Int.abs s))
+  ;;
+
+  let pieces_of (st : Game_state.t) (p : Player_kind.t) : Cell_position.t list =
+    Map.to_alist st.board
+    |> List.filter_map ~f:(fun (pos, occ) ->
+      match occ with
+      | Some who when Player_kind.equal who p -> Some pos
+      | _ -> None)
+  ;;
+
+  (* Greedy goal assignment cost for player p at state st. *)
+  let greedy_goal_cost (st : Game_state.t) (p : Player_kind.t) : int =
+    let goals =
+      Game_state.goals_for st p
+      |> List.sort ~compare:(fun a b -> Int.compare (ring_index b) (ring_index a))
+    in
+    let rec assign pieces goals acc =
+      match goals with
+      | [] -> acc
+      | g :: gs ->
+        let best_piece, best_d =
+          match pieces with
+          | [] -> g, 0
+          | _ ->
+            List.fold_left
+              pieces
+              ~init:(List.hd_exn pieces, Int.max_value)
+              ~f:(fun (bp, bd) piece ->
+                let d = hex_distance piece g in
+                if d < bd then piece, d else bp, bd)
+        in
+        let pieces' = remove_one ~equal:pos_equal best_piece pieces in
+        assign pieces' gs (acc + best_d)
+    in
+    assign (pieces_of st p) goals 0
+  ;;
+
+  (* Heuristic score from `for_player`’s perspective: (opp_best_cost - my_cost) *)
+  let heuristic_value ~(for_player : Player_kind.t) (st : Game_state.t) : int =
+    match st.decision with
+    | Decision.Winner who ->
+      if Player_kind.equal who for_player then Int.max_value else Int.min_value
+    | Decision.In_progress _ ->
+      let my_cost = greedy_goal_cost st for_player in
+      let others =
+        Game_state.players_in_game st.number_of_players
+        |> List.filter ~f:(fun p -> not (Player_kind.equal p for_player))
+      in
+      let opp_best =
+        match others with
+        | [] -> 0
+        | _ ->
+          others
+          |> List.map ~f:(fun p -> greedy_goal_cost st p)
+          |> List.min_elt ~compare:Int.compare
+          |> Option.value_exn
+      in
+      opp_best - my_cost
+  ;;
+
+  (* ---------- children generation with move cap ---------- *)
+
+  let children
+        ?(move_cap : int option)
+        (node : Game_state.t)
+        ~(for_player : Player_kind.t)
+    : (Move.t * Game_state.t) list
+    =
+    let moves = Game_state.all_legal_moves node in
+    let kids =
+      List.filter_map moves ~f:(fun mv ->
+        match Game_state.make_move node mv with
+        | Ok st' -> Some (mv, st')
+        | Error _ -> None)
+    in
+    (* Order children to help pruning: if it’s our turn, visit higher heuristic first;
+       else lower first. *)
+    let compare_dir =
+      match node.decision with
+      | Decision.In_progress { whose_turn } ->
+        if Player_kind.equal whose_turn for_player then Int.descending else Int.ascending
+      | Decision.Winner _ -> Int.ascending
+    in
+    let sorted =
+      List.sort kids ~compare:(fun (_m1, s1) (_m2, s2) ->
+        Comparable.lift ~f:(heuristic_value ~for_player) compare_dir s1 s2)
+    in
+    match move_cap with
+    | None -> sorted
+    | Some k -> List.take sorted k
+  ;;
+
+  (* ---------- alpha–beta ---------- *)
+
+  let rec alpha_beta
+            ?(move_cap : int option)
+            (node : Game_state.t)
+            ~(for_player : Player_kind.t)
+            (depth : int)
+            (alpha : int)
+            (beta : int)
+    : int
+    =
+    match node.decision with
+    | Decision.Winner _ -> heuristic_value ~for_player node
+    | Decision.In_progress { whose_turn } ->
+      if depth <= 0
+      then heuristic_value ~for_player node
+      else (
+        let ch = children ?move_cap node ~for_player in
+        if List.is_empty ch
+        then (
+          (* No legal moves: skip turn *)
+          let skipped = Game_state.skip_turn node in
+          alpha_beta ?move_cap skipped ~for_player (depth - 1) alpha beta)
+        else if Player_kind.equal whose_turn for_player
+        then (
+          (* maximizing *)
+          let best, _ =
+            List.fold_until
+              ch
+              ~init:(Int.min_value, alpha)
+              ~finish:(fun (v, _a) -> v, alpha)
+              ~f:(fun (best, a) (_mv, child) ->
+                let v =
+                  Int.max best (alpha_beta ?move_cap child ~for_player (depth - 1) a beta)
+                in
+                let a' = Int.max a v in
+                if v >= beta then Stop (v, a') else Continue (v, a'))
+          in
+          best)
+        else (
+          (* minimizing *)
+          let best, _ =
+            List.fold_until
+              ch
+              ~init:(Int.max_value, beta)
+              ~finish:(fun (v, _b) -> v, beta)
+              ~f:(fun (best, b) (_mv, child) ->
+                let v =
+                  Int.min
+                    best
+                    (alpha_beta ?move_cap child ~for_player (depth - 1) alpha b)
+                in
+                let b' = Int.min b v in
+                if v <= alpha then Stop (v, b') else Continue (v, b'))
+          in
+          best))
+  ;;
+
+  (* ---------- public entry ---------- *)
+
+  (* Evaluate each child ONCE; then pick the best. Also cap moves per node. *)
+  let choose_move_with_depth
+        ?(move_cap = 30)
+        ~(as_player : Player_kind.t)
+        ~(depth : int)
+        (st : Game_state.t)
+    : Move.t option
+    =
+    match st.decision with
+    | Decision.Winner _ -> None
+    | Decision.In_progress { whose_turn } ->
+      let kids = children ~move_cap st ~for_player:as_player in
+      if List.is_empty kids
+      then None
+      else (
+        let scored =
+          List.map kids ~f:(fun (mv, child) ->
+            let v =
+              alpha_beta
+                ~move_cap
+                child
+                ~for_player:as_player
+                (depth - 1)
+                Int.min_value
+                Int.max_value
+            in
+            mv, v)
+        in
+        let pick_max =
+          List.max_elt scored ~compare:(fun (_m1, v1) (_m2, v2) -> Int.compare v1 v2)
+        and pick_min =
+          List.min_elt scored ~compare:(fun (_m1, v1) (_m2, v2) -> Int.compare v1 v2)
+        in
+        if Player_kind.equal whose_turn as_player
+        then Option.map pick_max ~f:fst
+        else Option.map pick_min ~f:fst)
+  ;;
+
+  let choose_move ?depth ?move_cap ~(as_player : Player_kind.t) (st : Game_state.t)
+    : Move.t option
+    =
+    let depth = Option.value depth ~default:3 in
+    let move_cap = Option.value move_cap ~default:30 in
+    choose_move_with_depth ~move_cap ~as_player ~depth st
   ;;
 end

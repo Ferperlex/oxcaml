@@ -29,9 +29,7 @@ module Decision : sig
 end
 
 module Move : sig
-  type t
-
-  val create : Cell_position.t list -> t Or_error.t
+  type t = Cell_position.t list [@@deriving sexp, compare]
 end
 
 module Game_state : sig
@@ -39,13 +37,22 @@ module Game_state : sig
     { board : Player_kind.t option Cell_position.Map.t
     ; number_of_players : int
     ; decision : Decision.t
+    ; goals : (Player_kind.t * Cell_position.t list) list
     }
+  [@@deriving sexp]
 
-  val tri_pos_q : unit -> Cell_position.t list
-  val tri_neg_q : unit -> Cell_position.t list
-  val tri_pos_r : unit -> Cell_position.t list
-  val tri_neg_r : unit -> Cell_position.t list
-  val tri_pos_s : unit -> Cell_position.t list
-  val tri_neg_s : unit -> Cell_position.t list
   val create : number_of_players:int -> t Or_error.t
+  val all_legal_moves : t -> Move.t list
+  val skip_turn : t -> t
+  val has_any_legal_moves : t -> bool
+  val make_move : t -> Move.t -> t Or_error.t
+end
+
+module Ai : sig
+  val choose_move
+    :  ?depth:int
+    -> ?move_cap:int
+    -> as_player:Player_kind.t
+    -> Game_state.t
+    -> Move.t option
 end
