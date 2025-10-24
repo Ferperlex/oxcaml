@@ -27,7 +27,7 @@ body {
   --color-A: #2563eb; /* blue */
   --color-B: #f59e0b; /* orange/amber */
   --color-C: #10b981; /* green/teal */
-  --color-D: #f59e0b; /* amber (kept warm) */
+  --color-D: #111827; /* amber (kept warm) */
   --color-E: #8b5cf6; /* purple */
   --color-F: #ef4444; /* red */
 
@@ -35,7 +35,7 @@ body {
   --tint-A: #dceafe;  /* pale blue */
   --tint-B: #ffe1c4;  /* pale orange */
   --tint-C: #cff7e6;  /* pale green/teal */
-  --tint-D: #ffe8b3;  /* pale amber */
+  --tint-D: #d3d3d3;  /* pale amber */
   --tint-E: #eadcff;  /* pale purple */
   --tint-F: #ffd6d6;  /* pale red */
 
@@ -211,21 +211,58 @@ body {
 .banner--E { color: var(--color-E); }
 .banner--F { color: var(--color-F); }
 
-/* === Minimal overrides (only what you requested) === */
 
-/* 1) Player D color + its light turn tint */
-:root {
-  --piece-D: #111827;   /* black/slate 900 */
-  --tint-D:  #d3d3d3;   /* light gray */
+
+/* ======================= LANDING SCREEN ======================= */
+.landing {
+  position: fixed;
+  inset: 0;
+  z-index: 10; /* above everything */
+  display: grid;
+  place-items: center;
+  background: #0b1020;
+  color: #e5e7eb;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
 }
 
-/* 2) Center the landing title exactly in the middle */
 .landing__title {
+  position: absolute;
+  z-index: 11;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -220%);
+  font-size: clamp(1.6rem, 4vmin, 3rem);
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-shadow: 0 6px 24px rgba(0,0,0,0.35);
+  place-items: center;
+}
+
+.landing__grid {
   position: absolute;
   inset: 0;
   display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.landing__cell {
+  display: grid;
   place-items: center;
-  top: auto; left: auto;       /* override earlier positioning */
-  transform: none;             /* remove previous translate */
-  text-align: center;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.landing__cell--left { border-right: 4px solid rgba(255,255,255,0.12); }
+.landing__cell--top  { border-bottom: 4px solid rgba(255,255,255,0.12); }
+.landing__cell:hover {
+  background: rgba(255,255,255,0.06);
+  transform: scale(1.01);
+}
+
+.landing__label {
+  font-size: clamp(3rem, 14vmin, 12rem);
+  font-weight: 900;
+  line-height: 1;
+  color: #f9fafb;
+  text-shadow: 0 10px 40px rgba(0,0,0,0.55);
 }
