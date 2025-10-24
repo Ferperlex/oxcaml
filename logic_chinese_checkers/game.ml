@@ -286,6 +286,50 @@ module Game_state = struct
     | false -> pos_mem (forbidden_for st p) dest
   ;;
 
+  let next_step_options (st : t) ~(path : Cell_position.t list) : Cell_position.t list =
+    let dedup_sort xs = List.dedup_and_sort xs ~compare:Cell_position.compare in
+    match st.decision with
+    | Winner _ -> []
+    | In_progress { whose_turn } ->
+      let hop_landings_from (pos : Cell_position.t) ~(visited : Cell_position.t list) =
+        directions
+        |> List.filter_map ~f:(fun (dq, dr) ->
+          let mid = neighbor pos (dq, dr) in
+          let jump = neighbor pos (2 * dq, 2 * dr) in
+          match occupied st.board mid, landing_empty st.board jump with
+          | `Occupied, `Empty when not (List.mem visited jump ~equal:pos_equal) ->
+            Some jump
+          | _ -> None)
+      in
+      (match path with
+       | [] -> []
+       | [ start ] ->
+         (* First step can be either adjacent (final) or a single hop (may extend). *)
+         let adjacents =
+           directions
+           |> List.filter_map ~f:(fun dir ->
+             let dst = neighbor start dir in
+             match landing_empty st.board dst with
+             | `Empty ->
+               (* Adjacent move would be final; filter out forbidden landings here
+                    to avoid offering illegal single-steps. *)
+               if is_forbidden_landing st whose_turn dst then None else Some dst
+             | _ -> None)
+         in
+         let hops = hop_landings_from start ~visited:[ start ] in
+         dedup_sort (adjacents @ hops)
+       | a :: b :: _ ->
+         (* Determine if the first segment was an adjacent or a hop. *)
+         (match step_kind ~from_:a ~to_:b with
+          | `Adjacent ->
+            (* After an adjacent step you cannot extend; must confirm/cancel. *)
+            []
+          | `Invalid -> []
+          | `Hop_over _ ->
+            let curr = last_exn path in
+            hop_landings_from curr ~visited:path |> dedup_sort))
+  ;;
+
   let is_move_valid (st : t) (mv : Move.t) : unit Or_error.t =
     match mv with
     | [] | [ _ ] -> Or_error.error_s [%message "Move must have at least two positions"]
