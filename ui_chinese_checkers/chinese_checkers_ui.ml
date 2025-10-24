@@ -82,7 +82,7 @@ let color_name_of_player = function
   | Player_kind.A -> "Blue"
   | B -> "Orange"
   | C -> "Green"
-  | D -> "Amber"
+  | D -> "Black"
   | E -> "Purple"
   | F -> "Red"
 ;;
@@ -165,7 +165,7 @@ module Ui = struct
       ~attrs:[ Vdom.Attr.class_ "landing" ]
       [ Vdom.Node.div
           ~attrs:[ Vdom.Attr.class_ "landing__title" ]
-          [ Vdom.Node.text "How many players" ]
+          [ Vdom.Node.text "How many players?" ]
       ; Vdom.Node.div
           ~attrs:[ Vdom.Attr.class_ "landing__grid" ]
           [ cell "2" 2 [ "landing__cell--left"; "landing__cell--top" ]

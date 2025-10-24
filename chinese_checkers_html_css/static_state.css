@@ -1,18 +1,46 @@
-/* Fill the screen and center the board; prevent scroll “jiggle” */
+/* ============== Page & Root ============== */
+:root {
+  /* Piece colors */
+  --piece-A: #2563eb;   /* blue 600 */
+  --piece-B: #f59e0b;   /* orange/amber 500 */
+  --piece-C: #10b981;   /* emerald 500 */
+  --piece-D: #111827;   /* black/slate 900 (Player D distinct!) */
+  --piece-E: #8b5cf6;   /* violet 500 */
+  --piece-F: #ef4444;   /* red 500 */
+
+  /* Light turn-tint backgrounds */
+  --tint-A: #dceafe;  /* pale blue */
+  --tint-B: #ffe1c4;  /* pale orange */
+  --tint-C: #cff7e6;  /* pale green/teal */
+  --tint-D: #d3d3d3 ;  /* pale black */
+  --tint-E: #eadcff;  /* pale purple */
+  --tint-F: #ffd6d6;  /* pale red */
+
+  /* Neutrals */
+  --bg: #0b0f1a;        /* deep navy app bg */
+  --board-frame: rgba(255,255,255,0.06);
+  --board-inner: rgba(255,255,255,0.03);
+  --cell: rgba(255,255,255,0.04);
+  --cell-alt: rgba(255,255,255,0.06);
+  --cell-next-fill: rgba(255,255,255,0.22);
+  --action: #e5e7eb;    /* soft gray text/buttons */
+  --action-muted: #a1a1aa;
+  --confirm: #22c55e;
+  --cancel: #ef4444;
+}
+
 html, body {
   margin: 0;
-  height: 100%;
-}
-body {
+  padding: 0;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  display: grid;
-  place-items: center;
-  background: #0b1020; /* subtle dark backdrop to frame the board */
+  position: fixed !important;
+  background: var(--bg);
+  color: var(--action);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
 }
 
-/* Disable accidental text selection */
 * {
   -webkit-user-select: none;
   user-select: none;
@@ -21,243 +49,223 @@ body {
   outline: 0;
 }
 
-/* --- Color palette ------------------------------------------------------- */
-/* Player dots (solid) */
-:root {
-  --color-A: #2563eb; /* blue */
-  --color-B: #f59e0b; /* orange/amber */
-  --color-C: #10b981; /* green/teal */
-  --color-D: #f59e0b; /* amber (warm) */
-  --color-E: #8b5cf6; /* purple */
-  --color-F: #ef4444; /* red */
-
-  /* light tints for board background per turn (clearly visible) */
-  --tint-A: #dceafe;  /* pale blue */
-  --tint-B: #ffe1c4;  /* pale orange */
-  --tint-C: #cff7e6;  /* pale green/teal */
-  --tint-D: #ffe8b3;  /* pale amber */
-  --tint-E: #eadcff;  /* pale purple */
-  --tint-F: #ffd6d6;  /* pale red */
-
-  /* subtle neutral for cells (board wells) */
-  --well: #d8dee9;
-  --well-alt: #cfd6e2;
-
-  /* hint fill inside the wells for “next step” */
-  --hint: #111827;
+/* ============== App Containers ============== */
+.game {
+  position: fixed;
+  inset: 0;
 }
 
-/* --- Game container and board ------------------------------------------- */
-.game {
-  position: relative;
-  width: min(92vmin, 92vw);
-  height: min(92vmin, 92vh);
+/* When you tint the whole app based on whose turn */
+.game.game--turn-A { background: var(--tint-A); }
+.game.game--turn-B { background: var(--tint-B); }
+.game.game--turn-C { background: var(--tint-C); }
+.game.game--turn-D { background: var(--tint-D); }
+.game.game--turn-E { background: var(--tint-E); }
+.game.game--turn-F { background: var(--tint-F); }
+
+/* Board sits centered with square aspect, padded so nothing clips */
+.board {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
-  border-radius: 18px;
-  box-shadow:
-    0 20px 50px rgba(0,0,0,0.35),
-    inset 0 0 0 1px rgba(255,255,255,0.06);
-  background: #0f172a;
-  padding: 1.8vmin; /* outer padding around the board panel */
 }
 
-.board {
+.board__inner {
   position: relative;
-  width: 100%;
-  height: 100%;
-  border-radius: 16px;
-  background: var(--turn-tint, #f5f7fb);
+  width: min(92vmin, 92vmax);
+  aspect-ratio: 1;
+  border-radius: 20px;
+  background: var(--board-inner);
   box-shadow:
-    inset 0 0 0 1px rgba(0,0,0,0.08),
-    inset 0 0 30px rgba(0,0,0,0.10);
-  z-index: 1;
-  overflow: hidden;
+    0 0 0 1px var(--board-frame) inset,
+    0 10px 24px rgba(0,0,0,0.25);
+  /* Turn tint inside the board */
+}
+.board.board--turn-A .board__inner { background: linear-gradient(180deg, var(--tint-A), var(--board-inner)); }
+.board.board--turn-B .board__inner { background: linear-gradient(180deg, var(--tint-B), var(--board-inner)); }
+.board.board--turn-C .board__inner { background: linear-gradient(180deg, var(--tint-C), var(--board-inner)); }
+.board.board--turn-D .board__inner { background: linear-gradient(180deg, var(--tint-D), var(--board-inner)); }
+.board.board--turn-E .board__inner { background: linear-gradient(180deg, var(--tint-E), var(--board-inner)); }
+.board.board--turn-F .board__inner { background: linear-gradient(180deg, var(--tint-F), var(--board-inner)); }
+
+/* ============== Hex grid cells ============== */
+.cells {
+  position: absolute;
+  inset: 4.5%;
 }
 
-/* Turn tint wiring */
-.game.game--turn-A .board { --turn-tint: var(--tint-A); }
-.game.game--turn-B .board { --turn-tint: var(--tint-B); }
-.game.game--turn-C .board { --turn-tint: var(--tint-C); }
-.game.game--turn-D .board { --turn-tint: var(--tint-D); }
-.game.game--turn-E .board { --turn-tint: var(--tint-E); }
-.game.game--turn-F .board { --turn-tint: var(--tint-F); }
-
-/* --- Cells (absolute, normalized %) ------------------------------------- */
 .cell {
   position: absolute;
   transform: translate(-50%, -50%);
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--cell);
+  transition: transform 120ms ease, background 120ms ease, box-shadow 120ms ease;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.25) inset;
 }
 
-/* Subtle board “well” circle at each cell */
-.cell::before {
-  content: "";
-  position: absolute;
-  left: 50%; top: 50%;
-  transform: translate(-50%, -50%);
-  width: 70%;
-  height: 70%;
-  border-radius: 50%;
-  background: var(--well);
+/* Slight checker to ease reading; doesn’t affect symmetry */
+.cell.cell--alt { background: var(--cell-alt); }
+
+/* Next-step hint: color the INSIDE (no growing outline) */
+.cell.cell--next {
+  background: var(--cell-next-fill);
   box-shadow:
-    inset 0 2px 4px rgba(255,255,255,0.25),
-    inset 0 -3px 8px rgba(0,0,0,0.15);
-}
-.cell.cell--alt::before {
-  background: var(--well-alt);
+    0 0 0 2px rgba(255,255,255,0.12),
+    0 6px 10px rgba(0,0,0,0.28);
 }
 
-/* “Next step” hint: fill a smaller inner disc; no size jump */
-.cell.cell--next::after {
-  content: "";
-  position: absolute;
-  left: 50%; top: 50%;
-  transform: translate(-50%, -50%);
-  width: 36%;
-  height: 36%;
-  border-radius: 50%;
-  background: var(--hint);
-  opacity: 0.35;
-}
-
-/* --- Pieces -------------------------------------------------------------- */
+/* ============== Pieces ============== */
 .piece {
   position: absolute;
-  left: 50%; top: 50%;
-  transform: translate(-50%, -50%);
-  width: 58%;
-  height: 58%;
+  inset: 12%;
   border-radius: 50%;
   box-shadow:
-    0 4px 10px rgba(0,0,0,0.25),
-    inset 0 2px 6px rgba(255,255,255,0.35);
+    0 10px 18px rgba(0,0,0,0.28),
+    0 0 0 1.5px rgba(255,255,255,0.18) inset;
 }
 
-/* Colors for pieces */
-.piece--A { background: var(--color-A); }
-.piece--B { background: var(--color-B); }
-.piece--C { background: var(--color-C); }
-.piece--D { background: var(--color-D); }
-.piece--E { background: var(--color-E); }
-.piece--F { background: var(--color-F); }
+.piece--A { background: var(--piece-A); }
+.piece--B { background: var(--piece-B); }
+.piece--C { background: var(--piece-C); }
+.piece--D { background: var(--piece-D); } /* BLACK piece */
+.piece--E { background: var(--piece-E); }
+.piece--F { background: var(--piece-F); }
 
-/* Moving overlay (speculative position) */
 .piece--moving {
-  outline: 3px solid rgba(255,255,255,0.85);
+  filter: brightness(1.08) saturate(1.02);
   box-shadow:
-    0 10px 20px rgba(0,0,0,0.35),
-    inset 0 2px 8px rgba(255,255,255,0.55);
+    0 12px 20px rgba(0,0,0,0.32),
+    0 0 0 2px rgba(255,255,255,0.35) inset;
 }
 
-/* --- HUD (Confirm/Cancel) ------------------------------------------------ */
+/* ============== HUD (Confirm/Cancel) ============== */
 .hud {
   position: absolute;
-  top: 1.2rem;
-  right: 1.2rem;
-  z-index: 5;  /* above board */
-  pointer-events: none;
-}
-.hud__actions {
+  top: 1.5rem;
+  right: 1.5rem;
   display: flex;
-  gap: 0.6rem;
-  pointer-events: auto;
+  gap: 0.75rem;
+  z-index: 10;
 }
 
 .btn {
-  border: 0;
-  padding: 0.5rem 0.8rem;
-  border-radius: 10px;
+  background: rgba(17,24,39,0.7);
+  color: var(--action);
+  border: 1px solid rgba(255,255,255,0.15);
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
   font-weight: 600;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  letter-spacing: 0.2px;
   cursor: pointer;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  transition: transform 120ms ease, background 120ms ease, opacity 120ms ease;
+  backdrop-filter: blur(6px);
 }
-.btn[disabled] {
-  opacity: 0.45;
-  cursor: default;
-}
-.btn--confirm {
-  background: #111827;
-  color: #fefefe;
-}
-.btn--cancel {
-  background: #e5e7eb;
-  color: #1f2937;
-}
+.btn:hover { transform: translateY(-1px); }
+.btn[disabled] { opacity: 0.5; cursor: not-allowed; }
 
-/* --- Winner banner ------------------------------------------------------- */
-.banner {
-  position: absolute;
-  left: 50%;
-  top: 5%;
-  transform: translateX(-50%);
-  z-index: 6;
-  padding: 0.6rem 1.0rem;
-  border-radius: 12px;
-  font-weight: 800;
-  letter-spacing: 0.4px;
-  color: #0b1020;
-  background: #ffffff;
-  box-shadow:
-    0 15px 40px rgba(0,0,0,0.35),
-    inset 0 0 0 1px rgba(0,0,0,0.06);
-}
-.banner--A { color: var(--color-A); }
-.banner--B { color: var(--color-B); }
-.banner--C { color: var(--color-C); }
-.banner--D { color: var(--color-D); }
-.banner--E { color: var(--color-E); }
-.banner--F { color: var(--color-F); }
+.btn--confirm { background: rgba(34,197,94,0.85); color: #07120a; }
+.btn--confirm:hover { background: rgba(34,197,94,0.95); }
+.btn--cancel { background: rgba(239,68,68,0.85); color: #160707; }
+.btn--cancel:hover { background: rgba(239,68,68,0.95); }
 
-/* ======================= LANDING SCREEN ======================= */
+/* ============== Landing Overlay ============== */
 .landing {
   position: fixed;
   inset: 0;
-  z-index: 10; /* above everything */
+  display: grid;
+  place-items: center;        /* centers the title perfectly */
+  background: rgba(0,0,0,0.25);
+  z-index: 50;
+}
+
+.landing__panel {
+  position: relative;
+  width: min(92vmin, 92vmax);
+  aspect-ratio: 1;
+  border-radius: 20px;
+  background: rgba(10,15,25,0.75);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.08) inset,
+    0 24px 50px rgba(0,0,0,0.45);
   display: grid;
   place-items: center;
-  background: #0b1020;
-  color: #e5e7eb;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
 }
 
 .landing__title {
   position: absolute;
-  z-index: 11;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -220%);
-  font-size: clamp(1.6rem, 4vmin, 3rem);
+  z-index: 2;
+  text-align: center;
+  font-size: clamp(1.5rem, 3.2vw, 3rem);
   font-weight: 800;
-  letter-spacing: 0.6px;
-  text-shadow: 0 6px 24px rgba(0,0,0,0.35);
+  letter-spacing: 0.5px;
+  color: #e6eaf0;
+  text-shadow: 0 2px 14px rgba(0,0,0,0.5);
 }
 
+/* 2×2 grid selection with crosshair lines */
 .landing__grid {
   position: absolute;
   inset: 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  grid-template-rows: 1fr 1fr;
+  grid-template-rows:    1fr 1fr;
+}
+
+.landing__grid::before,
+.landing__grid::after {
+  content: "";
+  position: absolute;
+  background: rgba(255,255,255,0.12);
+  z-index: 1;
+}
+.landing__grid::before { /* vertical line */
+  width: 2px;
+  height: 100%;
+  left: 50%;
+  transform: translateX(-1px);
+}
+.landing__grid::after {  /* horizontal line */
+  width: 100%;
+  height: 2px;
+  top: 50%;
+  transform: translateY(-1px);
 }
 
 .landing__cell {
+  position: relative;
+  z-index: 2;
   display: grid;
   place-items: center;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
+  color: #e6eaf0;
+  font-weight: 800;
+  font-size: clamp(2.4rem, 8vmin, 4.2rem);
+  transition: background 120ms ease;
 }
-.landing__cell--left { border-right: 4px solid rgba(255,255,255,0.12); }
-.landing__cell--top  { border-bottom: 4px solid rgba(255,255,255,0.12); }
 .landing__cell:hover {
   background: rgba(255,255,255,0.06);
-  transform: scale(1.01);
 }
 
-.landing__label {
-  font-size: clamp(3rem, 14vmin, 12rem);
-  font-weight: 900;
-  line-height: 1;
-  color: #f9fafb;
-  text-shadow: 0 10px 40px rgba(0,0,0,0.55);
+/* ============== Winner Banner ============== */
+.banner {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  padding: 1.1rem 1.5rem;
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  color: #0a0f19;
+  z-index: 60;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.35);
 }
+.banner--A { background: var(--tint-A); }
+.banner--B { background: var(--tint-B); }
+.banner--C { background: var(--tint-C); }
+.banner--D { background: var(--tint-D); }
+.banner--E { background: var(--tint-E); }
+.banner--F { background: var(--tint-F); }
