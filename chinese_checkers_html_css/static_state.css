@@ -24,16 +24,16 @@ body {
 /* --- Color palette ------------------------------------------------------- */
 /* Player dots (solid) */
 :root {
-  --color-A: #2563eb; /* blue */
-  --color-B: #f59e0b; /* orange/amber */
+  --color-A: #f59e0b; /* blue */
+  --color-B: #2563eb; /* orange/amber */
   --color-C: #10b981; /* green/teal */
   --color-D: #111827; /* amber (kept warm) */
   --color-E: #8b5cf6; /* purple */
   --color-F: #ef4444; /* red */
 
   /* light tints for board background per turn (clearly visible, not “white-ish”) */
-  --tint-A: #dceafe;  /* pale blue */
-  --tint-B: #ffe1c4;  /* pale orange */
+  --tint-A: #ffe1c4;  /* pale blue */
+  --tint-B: #dceafe;  /* pale orange */
   --tint-C: #cff7e6;  /* pale green/teal */
   --tint-D: #d3d3d3;  /* pale amber */
   --tint-E: #eadcff;  /* pale purple */
