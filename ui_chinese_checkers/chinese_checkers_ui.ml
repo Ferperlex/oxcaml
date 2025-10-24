@@ -67,7 +67,7 @@ end
 
 (* ---------- Small helpers ---------- *)
 let pos_equal a b = Int.equal (Cell_position.compare a b) 0
-let last_exn xs = Option.value_exn (List.last xs)
+(* let last_exn xs = Option.value_exn (List.last xs) *)
 
 let class_of_player = function
   | Player_kind.A -> "A"
@@ -92,6 +92,7 @@ module Ui = struct
   type screen =
     | Landing
     | Playing of Game_state.t
+  [@@deriving equal, sexp]
 
   type model =
     { screen : screen
