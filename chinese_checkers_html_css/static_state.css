@@ -1,4 +1,4 @@
-/* Fullscreen center */
+/* Fullscreen center with soft neutral background (not white) */
 html, body {
   margin: 0;
   height: 100%;
@@ -8,64 +8,72 @@ body {
   height: 100vh;
   display: grid;
   place-items: center;
-  background: #f5f7fb;
+  background: #e9eef4; /* soft slate-blue */
   overflow: hidden;
 }
 
-/* Centered square that fits any viewport, with safe margin */
+/* Outer rectangle fills the viewport square and tints by turn */
 .game {
   position: relative;
   width: min(96vw, 96vh);
   aspect-ratio: 1 / 1;
   height: auto;
+  border-radius: 2.4vmin;
+  box-shadow:
+    0 0.6vmin 2vmin rgba(0,0,0,0.10),
+    inset 0 0 0.8vmin rgba(255,255,255,0.55);
+  overflow: visible;
 }
 
-/* Board takes all of .game; background tints by current player */
+/* Pale tints for the OUTER rectangle */
+.game--turn-A { background: radial-gradient(75% 75% at 50% 50%, #dfe9ff, #e8f0ff); } /* blue pale */
+.game--turn-B { background: radial-gradient(75% 75% at 50% 50%, #ffe7d6, #ffefe5); } /* orange pale */
+.game--turn-C { background: radial-gradient(75% 75% at 50% 50%, #e4f6ea, #ecfbf0); } /* green pale */
+.game--turn-D { background: radial-gradient(75% 75% at 50% 50%, #fff2d9, #fff6e6); } /* amber pale */
+.game--turn-E { background: radial-gradient(75% 75% at 50% 50%, #eee4ff, #f4edff); } /* purple pale */
+.game--turn-F { background: radial-gradient(75% 75% at 50% 50%, #ffe3e5, #ffeaec); } /* red pale */
+.game--turn-none { background: #e9eef4; }
+
+/* Inner board — centered and symmetric (no stretching) */
 .board {
   position: absolute;
   inset: 0;
   border-radius: 2vmin;
   overflow: visible;
+  /* Subtle panel over the game tint */
+  background: rgba(255,255,255,0.25);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   box-shadow:
-    0 0.4vmin 1vmin rgba(0,0,0,0.08),
-    inset 0 0 0.6vmin rgba(255,255,255,0.6);
-  background: #eef2f7; /* fallback */
+    inset 0 0 0.5vmin rgba(255,255,255,0.6),
+    0 0.2vmin 0.6vmin rgba(0,0,0,0.06);
 }
 
-/* Pale tints per turn (soft, not bright) */
-.board--turn-A { background: radial-gradient(75% 75% at 50% 50%, #e6efff, #edf3ff); } /* blue pale */
-.board--turn-B { background: radial-gradient(75% 75% at 50% 50%, #fff0e6, #fff5ed); } /* orange pale */
-.board--turn-C { background: radial-gradient(75% 75% at 50% 50%, #e9f8ec, #effaf2); } /* green pale */
-.board--turn-D { background: radial-gradient(75% 75% at 50% 50%, #fff7e6, #fff9ee); } /* amber pale */
-.board--turn-E { background: radial-gradient(75% 75% at 50% 50%, #f3eaff, #f7f1ff); } /* purple pale */
-.board--turn-F { background: radial-gradient(75% 75% at 50% 50%, #ffe9ea, #fff0f1); } /* red pale */
-.board--turn-none { background: #eef2f7; }
-
-/* Perfectly circular cells; size/position set inline */
+/* Perfectly circular cell “sockets”; we scale them down in code, so here is neutral */
 .cell {
   position: absolute;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: #dfe6ee;
+  background: #dae2ec;           /* muted slate for holes */
   box-shadow: inset 0 0.25vmin 0.6vmin rgba(0,0,0,0.08);
   z-index: 1;
 }
-.cell--alt { background: #e6ecf3; }
+.cell--alt { background: #e1e8f1; }
 
-/* Next-step suggestion: inner dot (no growth, no outline) */
+/* Next-step suggestion: inner dot only */
 .cell--next::after {
   content: "";
   position: absolute;
-  inset: 24%;
+  inset: 26%;
   border-radius: 50%;
-  background: rgba(90, 110, 140, 0.85);
+  background: rgba(60, 80, 115, 0.9);
   box-shadow: 0 0 0.6vmin rgba(0,0,0,0.12);
 }
 .cell--next:hover::after {
-  background: rgba(70, 90, 120, 0.95);
+  background: rgba(45, 65, 100, 0.95);
 }
 
-/* Pieces: slightly smaller than before for more breathing room */
+/* Pieces: smaller for breathing room; rich but not bright colors (reverted vibe) */
 .piece {
   position: absolute;
   left: 50%;
@@ -75,32 +83,32 @@ body {
   transform: translate(-50%, -50%);
   border-radius: 50%;
   box-shadow:
-    0 0.6vmin 1.2vmin rgba(0,0,0,0.16),
-    inset 0 0.4vmin 0.9vmin rgba(255,255,255,0.55);
+    0 0.5vmin 1.2vmin rgba(0,0,0,0.18),
+    inset 0 0.4vmin 0.9vmin rgba(255,255,255,0.52);
   z-index: 2;
 }
 .piece--moving {
   z-index: 3;
   box-shadow:
-    0 0.6vmin 1.2vmin rgba(0,0,0,0.2),
-    0 0 1.2vmin 0.16vmin rgba(37, 99, 235, 0.22),
-    inset 0 0.4vmin 0.9vmin rgba(255,255,255,0.6);
+    0 0.6vmin 1.4vmin rgba(0,0,0,0.22),
+    0 0 1.2vmin 0.16vmin rgba(37, 99, 235, 0.20),
+    inset 0 0.4vmin 1.0vmin rgba(255,255,255,0.60);
 }
 
-/* Deeper, less-bright piece colors */
+/* Deep, classic palette (not white/bright) */
 .piece--A { background: #2563eb; } /* blue-600 */
 .piece--B { background: #ea580c; } /* orange-600 */
 .piece--C { background: #16a34a; } /* green-600 */
-.piece--D { background: #ca8a04; } /* amber-600 */
+.piece--D { background: #b45309; } /* amber-700 (slightly deeper) */
 .piece--E { background: #7c3aed; } /* violet-600 */
 .piece--F { background: #dc2626; } /* red-600 */
 
 /* HUD: Confirm / Cancel while path is active */
 .hud {
   position: absolute;
-  top: 1.4vmin;
-  right: 1.4vmin;
-  z-index: 5;
+  top: 1.3vmin;
+  right: 1.3vmin;
+  z-index: 6;
 }
 .hud__actions {
   display: flex;
@@ -131,11 +139,11 @@ body {
   font-weight: 800;
   font-size: min(10vmin, 48px);
   color: white;
-  text-shadow: 0 0.6vmin 1.6vmin rgba(0,0,0,0.3);
+  text-shadow: 0 0.6vmin 1.6vmin rgba(0,0,0,0.35);
 }
 .banner--A { background: rgba(37, 99, 235, 0.85); }
 .banner--B { background: rgba(234, 88, 12, 0.85); }
 .banner--C { background: rgba(22, 163, 74, 0.85); }
-.banner--D { background: rgba(202, 138, 4, 0.85); }
+.banner--D { background: rgba(180, 83, 9, 0.85); }
 .banner--E { background: rgba(124, 58, 237, 0.85); }
 .banner--F { background: rgba(220, 38, 38, 0.85); }

@@ -37,7 +37,7 @@ module Layout = struct
     let max_x = List.max_elt xs ~compare:Float.compare |> Option.value ~default:1. in
     let min_y = List.min_elt ys ~compare:Float.compare |> Option.value ~default:0. in
     let max_y = List.max_elt ys ~compare:Float.compare |> Option.value ~default:1. in
-    (* Expand by half a hex so edges are fully visible *)
+    (* expand by half a hex so edges are fully visible *)
     let min_x = min_x -. half_w
     and max_x = max_x +. half_w in
     let min_y = min_y -. half_h
@@ -48,16 +48,16 @@ module Layout = struct
     { cx; cy; span }
   ;;
 
-  (* fit = additional padding inside the square (e.g. 0.92 = 8% margin) *)
+  (* fit = inner padding margin (0.0..1.0). 0.88 = more padding than before *)
   let normalize ~bounds ~(fit : float) (x, y) =
     let nx = ((x -. bounds.cx) /. bounds.span *. fit) +. 0.5 in
     let ny = ((y -. bounds.cy) /. bounds.span *. fit) +. 0.5 in
     nx *. 100.0, ny *. 100.0
   ;;
 
-  let cell_size_pct ~bounds ~(fit : float) =
-    let cw = w /. bounds.span *. fit *. 100.0 in
-    let ch = h /. bounds.span *. fit *. 100.0 in
+  let cell_size_pct ~bounds ~(fit : float) ~(cell_scale : float) =
+    let cw = w /. bounds.span *. fit *. cell_scale *. 100.0 in
+    let ch = h /. bounds.span *. fit *. cell_scale *. 100.0 in
     cw, ch
   ;;
 end
@@ -96,7 +96,7 @@ let moves_from (st : Game_state.t) (start : Cell_position.t) : Move.t list =
 module Ui = struct
   type model =
     { game_state : Game_state.t
-    ; path : Cell_position.t list (* in-progress path; [] means none *)
+    ; path : Cell_position.t list (* in-progress path; [] => no selection *)
     }
   [@@deriving equal, sexp]
 
@@ -135,13 +135,15 @@ module Ui = struct
 
   let view (model : model) ~(inject : action -> unit Ui_effect.t) : Vdom.Node.t =
     let st = model.game_state in
-    (* Precompute layout with UNIFORM scaling + padding *)
+    (* Precompute layout with UNIFORM scaling + a bit more inner padding *)
     let cells = Map.to_alist st.board in
     let bounds = Layout.uniform_bounds cells in
-    let fit = 0.92 in
-    (* a bit more inner padding *)
-    let cell_w, cell_h = Layout.cell_size_pct ~bounds ~fit in
-    (* Next steps from staged path (Game_state.next_steps_from_path controls jump logic) *)
+    let fit = 0.88 in
+    (* more breathing space from the rect edges *)
+    let cell_scale = 0.82 in
+    (* smaller board circles *)
+    let cell_w, cell_h = Layout.cell_size_pct ~bounds ~fit ~cell_scale in
+    (* Next steps from staged path (respects hop-vs-adjacent rule) *)
     let next_steps = Game_state.next_steps_from_path st ~path:model.path in
     let is_next pos = List.mem next_steps pos ~equal:pos_equal in
     (* Moving overlay at the head of the staged path *)
@@ -162,11 +164,11 @@ module Ui = struct
         | Error _ -> false)
       else false
     in
-    (* Whose turn -> board tint class *)
-    let board_turn_class =
+    (* Turn tints on BOTH the outer rectangle and the inner board for clarity *)
+    let turn_class =
       match st.decision with
-      | Decision.In_progress { whose_turn } -> "board--turn-" ^ class_of_player whose_turn
-      | Decision.Winner _ -> "board--turn-none"
+      | Decision.In_progress { whose_turn } -> class_of_player whose_turn
+      | Decision.Winner _ -> "none"
     in
     (* Render a single hex cell *)
     let render_cell ((pos : Cell_position.t), occ) =
@@ -270,9 +272,9 @@ module Ui = struct
       | _ -> Vdom.Node.none
     in
     Vdom.Node.div
-      ~attrs:[ Vdom.Attr.class_ "game" ]
+      ~attrs:[ Vdom.Attr.classes [ "game"; "game--turn-" ^ turn_class ] ]
       [ Vdom.Node.div
-          ~attrs:[ Vdom.Attr.classes [ "board"; board_turn_class ] ]
+          ~attrs:[ Vdom.Attr.classes [ "board"; "board--turn-" ^ turn_class ] ]
           (List.map cells ~f:render_cell)
       ; hud
       ; win_banner
