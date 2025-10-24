@@ -1,4 +1,4 @@
-/* Fullscreen center, no clipping */
+/* Fullscreen center */
 html, body {
   margin: 0;
   height: 100%;
@@ -8,94 +8,106 @@ body {
   height: 100vh;
   display: grid;
   place-items: center;
-  background: #f8fafc;
+  background: #f5f7fb;
   overflow: hidden;
 }
 
-/* Perfectly centered square that ALWAYS fits */
+/* Centered square that fits any viewport, with safe margin */
 .game {
   position: relative;
-  width: min(96vw, 96vh);   /* leave safe margins to avoid edge clipping */
+  width: min(96vw, 96vh);
   aspect-ratio: 1 / 1;
   height: auto;
 }
 
-/* The board fills the square completely */
+/* Board takes all of .game; background tints by current player */
 .board {
   position: absolute;
   inset: 0;
   border-radius: 2vmin;
-  background: radial-gradient(70% 70% at 50% 50%, #ffffff, #f1f5f9);
+  overflow: visible;
   box-shadow:
-    0 0.5vmin 1vmin rgba(0,0,0,0.06),
-    inset 0 0 0.5vmin rgba(255,255,255,0.5);
-  overflow: visible; /* allow outermost circles to show fully */
+    0 0.4vmin 1vmin rgba(0,0,0,0.08),
+    inset 0 0 0.6vmin rgba(255,255,255,0.6);
+  background: #eef2f7; /* fallback */
 }
 
-/* HUD floats above, top-right inside the square */
-.hud {
-  position: absolute;
-  top: 1.6vmin;
-  right: 1.6vmin;
-  z-index: 5;
-}
-.hud__actions {
-  display: flex;
-  gap: 0.75vmin;
-}
+/* Pale tints per turn (soft, not bright) */
+.board--turn-A { background: radial-gradient(75% 75% at 50% 50%, #e6efff, #edf3ff); } /* blue pale */
+.board--turn-B { background: radial-gradient(75% 75% at 50% 50%, #fff0e6, #fff5ed); } /* orange pale */
+.board--turn-C { background: radial-gradient(75% 75% at 50% 50%, #e9f8ec, #effaf2); } /* green pale */
+.board--turn-D { background: radial-gradient(75% 75% at 50% 50%, #fff7e6, #fff9ee); } /* amber pale */
+.board--turn-E { background: radial-gradient(75% 75% at 50% 50%, #f3eaff, #f7f1ff); } /* purple pale */
+.board--turn-F { background: radial-gradient(75% 75% at 50% 50%, #ffe9ea, #fff0f1); } /* red pale */
+.board--turn-none { background: #eef2f7; }
 
-/* Circular cells; size/position set inline */
+/* Perfectly circular cells; size/position set inline */
 .cell {
   position: absolute;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: #e2e8f0;
-  box-shadow: inset 0 0.3vmin 0.6vmin rgba(0,0,0,0.08);
+  background: #dfe6ee;
+  box-shadow: inset 0 0.25vmin 0.6vmin rgba(0,0,0,0.08);
   z-index: 1;
 }
-.cell--alt { background: #e9eef5; }
+.cell--alt { background: #e6ecf3; }
 
-/* Next-step suggestion */
-.cell--next {
-  outline: 0.45vmin solid #94a3b8;
-  cursor: pointer;
+/* Next-step suggestion: inner dot (no growth, no outline) */
+.cell--next::after {
+  content: "";
+  position: absolute;
+  inset: 24%;
+  border-radius: 50%;
+  background: rgba(90, 110, 140, 0.85);
+  box-shadow: 0 0 0.6vmin rgba(0,0,0,0.12);
 }
-.cell--next:hover { outline-color: #475569; }
+.cell--next:hover::after {
+  background: rgba(70, 90, 120, 0.95);
+}
 
-/* Pieces (drawn above cells) */
+/* Pieces: slightly smaller than before for more breathing room */
 .piece {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 70%;
-  height: 70%;
+  width: 62%;
+  height: 62%;
   transform: translate(-50%, -50%);
   border-radius: 50%;
   box-shadow:
-    0 0.6vmin 1.2vmin rgba(0,0,0,0.15),
-    inset 0 0.4vmin 0.8vmin rgba(255,255,255,0.5);
-  z-index: 2; /* above cell */
+    0 0.6vmin 1.2vmin rgba(0,0,0,0.16),
+    inset 0 0.4vmin 0.9vmin rgba(255,255,255,0.55);
+  z-index: 2;
 }
-/* Moving overlay drawn above everything else inside the cell */
 .piece--moving {
   z-index: 3;
   box-shadow:
-    0 0.6vmin 1.2vmin rgba(0,0,0,0.18),
-    0 0 1.2vmin 0.2vmin rgba(14,165,233,0.35),
-    inset 0 0.4vmin 0.8vmin rgba(255,255,255,0.55);
+    0 0.6vmin 1.2vmin rgba(0,0,0,0.2),
+    0 0 1.2vmin 0.16vmin rgba(37, 99, 235, 0.22),
+    inset 0 0.4vmin 0.9vmin rgba(255,255,255,0.6);
 }
 
-/* Player colors */
-.piece--A { background: #0ea5e9; }  /* sky */
-.piece--B { background: #f97316; }  /* orange */
-.piece--C { background: #22c55e; }  /* green */
-.piece--D { background: #eab308; }  /* yellow */
-.piece--E { background: #a855f7; }  /* purple */
-.piece--F { background: #ef4444; }  /* red */
+/* Deeper, less-bright piece colors */
+.piece--A { background: #2563eb; } /* blue-600 */
+.piece--B { background: #ea580c; } /* orange-600 */
+.piece--C { background: #16a34a; } /* green-600 */
+.piece--D { background: #ca8a04; } /* amber-600 */
+.piece--E { background: #7c3aed; } /* violet-600 */
+.piece--F { background: #dc2626; } /* red-600 */
 
-/* Buttons */
+/* HUD: Confirm / Cancel while path is active */
+.hud {
+  position: absolute;
+  top: 1.4vmin;
+  right: 1.4vmin;
+  z-index: 5;
+}
+.hud__actions {
+  display: flex;
+  gap: 0.7vmin;
+}
 .btn {
-  padding: 0.6vmin 1.4vmin;
+  padding: 0.55vmin 1.3vmin;
   border-radius: 1.2vmin;
   border: none;
   font-size: min(2.6vmin, 16px);
@@ -105,9 +117,25 @@ body {
   box-shadow: 0 0.4vmin 0.8vmin rgba(0,0,0,0.08);
   cursor: pointer;
 }
-.btn[disabled] {
-  opacity: 0.45;
-  cursor: default;
-}
+.btn[disabled] { opacity: 0.45; cursor: default; }
 .btn--confirm { background: #10b981; color: white; }
 .btn--cancel  { background: #ef4444; color: white; }
+
+/* Winner banner */
+.banner {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 10;
+  font-weight: 800;
+  font-size: min(10vmin, 48px);
+  color: white;
+  text-shadow: 0 0.6vmin 1.6vmin rgba(0,0,0,0.3);
+}
+.banner--A { background: rgba(37, 99, 235, 0.85); }
+.banner--B { background: rgba(234, 88, 12, 0.85); }
+.banner--C { background: rgba(22, 163, 74, 0.85); }
+.banner--D { background: rgba(202, 138, 4, 0.85); }
+.banner--E { background: rgba(124, 58, 237, 0.85); }
+.banner--F { background: rgba(220, 38, 38, 0.85); }

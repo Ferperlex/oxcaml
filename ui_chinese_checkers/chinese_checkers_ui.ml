@@ -4,7 +4,7 @@ open Chinese_checkers_logic_library
 open Game
 open! Bonsai.Let_syntax
 
-(* ---------- Hex layout (flat-topped axial -> normalized %) ---------- *)
+(* ---------- Hex layout (flat-topped axial) with UNIFORM scaling ---------- *)
 module Layout = struct
   let size = 1.0
   let w = 2.0 *. size
@@ -15,19 +15,20 @@ module Layout = struct
   let xy_of_axial (q, r) =
     let qf = Float.of_int q
     and rf = Float.of_int r in
+    (* flat-topped axial to pixel *)
     let x = 1.5 *. size *. qf in
     let y = Float.sqrt 3.0 *. size *. (rf +. (qf /. 2.0)) in
     x, y
   ;;
 
-  type bbox =
-    { min_x : float
-    ; max_x : float
-    ; min_y : float
-    ; max_y : float
+  type bounds =
+    { cx : float
+    ; cy : float
+    ; span : float
     }
+  (* uniform span *)
 
-  let bbox_of_cells (cells : (Cell_position.t * 'a) list) : bbox =
+  let uniform_bounds (cells : (Cell_position.t * 'a) list) : bounds =
     let xs, ys =
       List.map cells ~f:(fun (pos, _) -> xy_of_axial (pos.q_coordinate, pos.r_coordinate))
       |> List.unzip
@@ -36,30 +37,34 @@ module Layout = struct
     let max_x = List.max_elt xs ~compare:Float.compare |> Option.value ~default:1. in
     let min_y = List.min_elt ys ~compare:Float.compare |> Option.value ~default:0. in
     let max_y = List.max_elt ys ~compare:Float.compare |> Option.value ~default:1. in
-    (* expand half-hex so outer rims are fully visible *)
-    { min_x = min_x -. half_w
-    ; max_x = max_x +. half_w
-    ; min_y = min_y -. half_h
-    ; max_y = max_y +. half_h
-    }
+    (* Expand by half a hex so edges are fully visible *)
+    let min_x = min_x -. half_w
+    and max_x = max_x +. half_w in
+    let min_y = min_y -. half_h
+    and max_y = max_y +. half_h in
+    let cx = (min_x +. max_x) /. 2.0 in
+    let cy = (min_y +. max_y) /. 2.0 in
+    let span = Float.max (max_x -. min_x) (max_y -. min_y) in
+    { cx; cy; span }
   ;;
 
-  let normalize ~bbox (x, y) =
-    let nx = (x -. bbox.min_x) /. (bbox.max_x -. bbox.min_x) in
-    let ny = (y -. bbox.min_y) /. (bbox.max_y -. bbox.min_y) in
+  (* fit = additional padding inside the square (e.g. 0.92 = 8% margin) *)
+  let normalize ~bounds ~(fit : float) (x, y) =
+    let nx = ((x -. bounds.cx) /. bounds.span *. fit) +. 0.5 in
+    let ny = ((y -. bounds.cy) /. bounds.span *. fit) +. 0.5 in
     nx *. 100.0, ny *. 100.0
   ;;
 
-  let cell_size_pct ~bbox =
-    let cw = w /. (bbox.max_x -. bbox.min_x) *. 100.0 in
-    let ch = h /. (bbox.max_y -. bbox.min_y) *. 100.0 in
+  let cell_size_pct ~bounds ~(fit : float) =
+    let cw = w /. bounds.span *. fit *. 100.0 in
+    let ch = h /. bounds.span *. fit *. 100.0 in
     cw, ch
   ;;
 end
 
 (* ---------- Small helpers ---------- *)
 let pos_equal a b = Int.equal (Cell_position.compare a b) 0
-(* let last_exn xs = Option.value_exn (List.last xs) *)
+let last_exn xs = Option.value_exn (List.last xs)
 
 let class_of_player = function
   | Player_kind.A -> "A"
@@ -70,13 +75,22 @@ let class_of_player = function
   | F -> "F"
 ;;
 
+let color_name_of_player = function
+  | Player_kind.A -> "Blue"
+  | B -> "Orange"
+  | C -> "Green"
+  | D -> "Amber"
+  | E -> "Purple"
+  | F -> "Red"
+;;
+
 (* Given a selected start cell, collect all legal moves that start there *)
-(* let moves_from (st : Game_state.t) (start : Cell_position.t) : Move.t list =
+let moves_from (st : Game_state.t) (start : Cell_position.t) : Move.t list =
   Game_state.all_legal_moves st
   |> List.filter ~f:(function
     | s :: _ -> pos_equal s start
     | _ -> false)
-;; *)
+;;
 
 (* ---------- Bonsai UI ---------- *)
 module Ui = struct
@@ -121,14 +135,16 @@ module Ui = struct
 
   let view (model : model) ~(inject : action -> unit Ui_effect.t) : Vdom.Node.t =
     let st = model.game_state in
-    (* Precompute layout *)
+    (* Precompute layout with UNIFORM scaling + padding *)
     let cells = Map.to_alist st.board in
-    let bbox = Layout.bbox_of_cells cells in
-    let cell_w, cell_h = Layout.cell_size_pct ~bbox in
-    (* Compute next steps based on staged path *)
+    let bounds = Layout.uniform_bounds cells in
+    let fit = 0.92 in
+    (* a bit more inner padding *)
+    let cell_w, cell_h = Layout.cell_size_pct ~bounds ~fit in
+    (* Next steps from staged path (Game_state.next_steps_from_path controls jump logic) *)
     let next_steps = Game_state.next_steps_from_path st ~path:model.path in
     let is_next pos = List.mem next_steps pos ~equal:pos_equal in
-    (* Show moving overlay at head of staged path *)
+    (* Moving overlay at the head of the staged path *)
     let moving_owner, moving_head =
       match model.path with
       | start :: _ ->
@@ -146,10 +162,16 @@ module Ui = struct
         | Error _ -> false)
       else false
     in
+    (* Whose turn -> board tint class *)
+    let board_turn_class =
+      match st.decision with
+      | Decision.In_progress { whose_turn } -> "board--turn-" ^ class_of_player whose_turn
+      | Decision.Winner _ -> "board--turn-none"
+    in
     (* Render a single hex cell *)
     let render_cell ((pos : Cell_position.t), occ) =
       let x, y = Layout.xy_of_axial (pos.q_coordinate, pos.r_coordinate) in
-      let left_pct, top_pct = Layout.normalize ~bbox (x, y) in
+      let left_pct, top_pct = Layout.normalize ~bounds ~fit (x, y) in
       let alt = (pos.q_coordinate + pos.r_coordinate) land 1 = 0 in
       (* Hide base piece if it’s the start of a staged path *)
       let is_path_start =
@@ -157,7 +179,6 @@ module Ui = struct
         | s :: _ -> pos_equal s pos
         | _ -> false
       in
-      (* Base (board) piece; selectable if it's your turn and no path in progress *)
       let base_piece =
         match occ with
         | None -> Vdom.Node.none
@@ -190,7 +211,7 @@ module Ui = struct
             []
         | _ -> Vdom.Node.none
       in
-      (* Click: extend path to a next-step destination *)
+      (* Click: extend path to next-step destination *)
       let dest_click_attr =
         if is_next pos
         then Vdom.Attr.on_click (fun _ -> inject (Extend_path pos))
@@ -238,10 +259,23 @@ module Ui = struct
               ]
           ]
     in
+    (* Winner banner *)
+    let win_banner =
+      match st.decision with
+      | Decision.Winner who ->
+        let who_name = color_name_of_player who in
+        Vdom.Node.div
+          ~attrs:[ Vdom.Attr.class_ ("banner banner--" ^ class_of_player who) ]
+          [ Vdom.Node.text (who_name ^ " Wins!") ]
+      | _ -> Vdom.Node.none
+    in
     Vdom.Node.div
       ~attrs:[ Vdom.Attr.class_ "game" ]
-      [ Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "board" ] (List.map cells ~f:render_cell)
+      [ Vdom.Node.div
+          ~attrs:[ Vdom.Attr.classes [ "board"; board_turn_class ] ]
+          (List.map cells ~f:render_cell)
       ; hud
+      ; win_banner
       ]
   ;;
 
