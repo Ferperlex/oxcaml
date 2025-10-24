@@ -67,7 +67,7 @@ end
 
 (* ---------- Small helpers ---------- *)
 let pos_equal a b = Int.equal (Cell_position.compare a b) 0
-(* let last_exn xs = Option.value_exn (List.last xs) *)
+let last_exn xs = Option.value_exn (List.last xs)
 
 let class_of_player = function
   | Player_kind.A -> "A"
@@ -89,78 +89,124 @@ let color_name_of_player = function
 
 (* ---------- Bonsai UI ---------- *)
 module Ui = struct
+  type screen =
+    | Landing
+    | Playing of Game_state.t
+
   type model =
-    { game_state : Game_state.t
+    { screen : screen
     ; path : Cell_position.t list (* in-progress path; [] => no selection *)
     }
   [@@deriving equal, sexp]
 
-  let initial_model game_state = { game_state; path = [] }
+  let initial_model = { screen = Landing; path = [] }
 
   type action =
+    | Start_game of int
     | Select_start of Cell_position.t
     | Extend_path of Cell_position.t
     | Confirm_path
     | Cancel_path
 
   let apply_action (m : model) (a : action) : model =
-    match a with
-    | Cancel_path -> { m with path = [] }
-    | Select_start pos ->
-      (match m.game_state.decision with
+    match a, m.screen with
+    | Start_game n, _ ->
+      (match Game_state.create ~number_of_players:n with
+       | Ok st -> { screen = Playing st; path = [] }
+       | Error _ -> m)
+    | Cancel_path, Playing _ -> { m with path = [] }
+    | Cancel_path, Landing -> m
+    | Select_start pos, Playing st ->
+      (match st.decision with
        | Decision.In_progress { whose_turn } ->
-         (match Map.find m.game_state.board pos with
+         (match Map.find st.board pos with
           | Some (Some who) when Player_kind.equal who whose_turn && List.is_empty m.path
             -> { m with path = [ pos ] }
           | _ -> m)
        | _ -> m)
-    | Extend_path dst ->
+    | Select_start _, Landing -> m
+    | Extend_path dst, Playing st ->
       if List.is_empty m.path
       then m
       else (
-        let nexts = Game_state.next_steps_from_path m.game_state ~path:m.path in
+        let nexts = Game_state.next_steps_from_path st ~path:m.path in
         if List.mem nexts dst ~equal:pos_equal
         then { m with path = m.path @ [ dst ] }
         else m)
-    | Confirm_path ->
+    | Extend_path _, Landing -> m
+    | Confirm_path, Playing st ->
       if List.length m.path < 2
       then m
       else (
-        match Game_state.is_move_valid m.game_state m.path with
+        match Game_state.is_move_valid st m.path with
         | Ok () ->
-          (match Game_state.make_move m.game_state m.path with
-           | Ok st' -> { game_state = st'; path = [] }
+          (match Game_state.make_move st m.path with
+           | Ok st' -> { screen = Playing st'; path = [] }
            | Error _ -> { m with path = [] })
         | Error _ -> { m with path = [] })
+    | Confirm_path, Landing -> m
   ;;
 
-  let view (model : model) ~(inject : action -> unit Ui_effect.t) : Vdom.Node.t =
-    let st = model.game_state in
+  (* ---------- Landing screen ---------- *)
+  let landing ~(inject : action -> unit Ui_effect.t) : Vdom.Node.t =
+    let cell lbl n extra_classes =
+      Vdom.Node.div
+        ~attrs:
+          [ Vdom.Attr.classes ("landing__cell" :: extra_classes)
+          ; Vdom.Attr.on_click (fun _ -> inject (Start_game n))
+          ]
+        [ Vdom.Node.div
+            ~attrs:[ Vdom.Attr.class_ "landing__label" ]
+            [ Vdom.Node.text lbl ]
+        ]
+    in
+    Vdom.Node.div
+      ~attrs:[ Vdom.Attr.class_ "landing" ]
+      [ Vdom.Node.div
+          ~attrs:[ Vdom.Attr.class_ "landing__title" ]
+          [ Vdom.Node.text "How many players" ]
+      ; Vdom.Node.div
+          ~attrs:[ Vdom.Attr.class_ "landing__grid" ]
+          [ cell "2" 2 [ "landing__cell--left"; "landing__cell--top" ]
+          ; cell "3" 3 [ "landing__cell--top" ]
+          ; cell "4" 4 [ "landing__cell--left" ]
+          ; cell "6" 6 []
+          ]
+      ]
+  ;;
+
+  (* ---------- Playing view ---------- *)
+  let playing_view
+        (st : Game_state.t)
+        (path : Cell_position.t list)
+        ~(inject : action -> unit Ui_effect.t)
+    : Vdom.Node.t
+    =
     (* Precompute layout with UNIFORM scaling *)
     let cells = Map.to_alist st.board in
     let bounds = Layout.uniform_bounds cells in
     let fit = 0.92 in
-    (* extra padding so dots don't touch the frame *)
+    (* padding so dots don't touch the frame *)
     let cell_scale = 0.74 in
     (* smaller circles *)
     let cell_w, cell_h = Layout.cell_size_pct ~bounds ~fit ~cell_scale in
     (* Next steps from staged path (respects hop-vs-adjacent rule) *)
-    let next_steps = Game_state.next_steps_from_path st ~path:model.path in
+    let next_steps = Game_state.next_steps_from_path st ~path in
     let is_next pos = List.mem next_steps pos ~equal:pos_equal in
     (* Moving overlay at the head of the staged path (speculative move) *)
     let moving_owner, moving_head =
-      match model.path with
+      match path with
       | start :: _ ->
         (match Map.find st.board start with
-         | Some (Some who) -> Some who, List.last model.path
+         | Some (Some who) -> Some who, List.last path
          | _ -> None, None)
       | [] -> None, None
     in
     (* Confirm becomes active only if path is a legal move *)
     let can_confirm =
-      if List.length model.path >= 2
+      if List.length path >= 2
       then (
-        match Game_state.is_move_valid st model.path with
+        match Game_state.is_move_valid st path with
         | Ok () -> true
         | Error _ -> false)
       else false
@@ -178,7 +224,7 @@ module Ui = struct
       let alt = (pos.q_coordinate + pos.r_coordinate) land 1 = 0 in
       (* Hide base piece if it's the start of a staged path *)
       let is_path_start =
-        match model.path with
+        match path with
         | s :: _ -> pos_equal s pos
         | _ -> false
       in
@@ -188,7 +234,7 @@ module Ui = struct
         | None -> Vdom.Node.none
         | Some who ->
           let selectable =
-            match st.decision, model.path with
+            match st.decision, path with
             | Decision.In_progress { whose_turn }, []
               when Player_kind.equal whose_turn who ->
               [ Vdom.Attr.on_click (fun _ -> inject (Select_start pos)) ]
@@ -239,7 +285,7 @@ module Ui = struct
     in
     (* HUD with Confirm/Cancel while building a move *)
     let hud =
-      match model.path with
+      match path with
       | [] -> Vdom.Node.none
       | _ :: _ ->
         Vdom.Node.div
@@ -283,13 +329,19 @@ module Ui = struct
       ]
   ;;
 
-  let component ~(initial_state : Game_state.t) =
+  let view (model : model) ~(inject : action -> unit Ui_effect.t) : Vdom.Node.t =
+    match model.screen with
+    | Landing -> landing ~inject
+    | Playing st -> playing_view st model.path ~inject
+  ;;
+
+  let component () =
     let%sub model, set_model =
       Bonsai.state
         (module struct
           type t = model [@@deriving equal, sexp]
         end)
-        ~default_model:(initial_model initial_state)
+        ~default_model:initial_model
     in
     let%arr model = model
     and set_model = set_model in
@@ -302,9 +354,5 @@ module Ui = struct
 end
 
 (* Entry point *)
-let app =
-  let initial_state = Game_state.create ~number_of_players:2 |> Or_error.ok_exn in
-  Ui.component ~initial_state
-;;
-
+let app = Ui.component ()
 let () = Bonsai_web.Start.start app
