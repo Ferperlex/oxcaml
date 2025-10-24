@@ -26,8 +26,8 @@ module Layout = struct
     ; cy : float
     ; span : float
     }
-  (* uniform span *)
 
+  (* Compute a single uniform span that covers X and Y, centered *)
   let uniform_bounds (cells : (Cell_position.t * 'a) list) : bounds =
     let xs, ys =
       List.map cells ~f:(fun (pos, _) -> xy_of_axial (pos.q_coordinate, pos.r_coordinate))
@@ -48,13 +48,14 @@ module Layout = struct
     { cx; cy; span }
   ;;
 
-  (* fit = inner padding margin (0.0..1.0). 0.88 = more padding than before *)
+  (* fit = inner padding fraction (0..1). Use a bit more padding for breathing room. *)
   let normalize ~bounds ~(fit : float) (x, y) =
     let nx = ((x -. bounds.cx) /. bounds.span *. fit) +. 0.5 in
     let ny = ((y -. bounds.cy) /. bounds.span *. fit) +. 0.5 in
     nx *. 100.0, ny *. 100.0
   ;;
 
+  (* cell_scale shrinks each hex’s visual bbox to keep dots smaller than cells *)
   let cell_size_pct ~bounds ~(fit : float) ~(cell_scale : float) =
     let cw = w /. bounds.span *. fit *. cell_scale *. 100.0 in
     let ch = h /. bounds.span *. fit *. cell_scale *. 100.0 in
@@ -64,7 +65,6 @@ end
 
 (* ---------- Small helpers ---------- *)
 let pos_equal a b = Int.equal (Cell_position.compare a b) 0
-let last_exn xs = Option.value_exn (List.last xs)
 
 let class_of_player = function
   | Player_kind.A -> "A"
@@ -85,7 +85,7 @@ let color_name_of_player = function
 ;;
 
 (* Given a selected start cell, collect all legal moves that start there *)
-let moves_from (st : Game_state.t) (start : Cell_position.t) : Move.t list =
+let _moves_from (st : Game_state.t) (start : Cell_position.t) : Move.t list =
   Game_state.all_legal_moves st
   |> List.filter ~f:(function
     | s :: _ -> pos_equal s start
@@ -114,13 +114,21 @@ module Ui = struct
     | Select_start pos ->
       (match m.game_state.decision with
        | Decision.In_progress { whose_turn } ->
+         (* only allow starting from your own piece, and only if not already staging a path *)
          (match Map.find m.game_state.board pos with
           | Some (Some who) when Player_kind.equal who whose_turn && List.is_empty m.path
             -> { m with path = [ pos ] }
           | _ -> m)
        | _ -> m)
     | Extend_path dst ->
-      if List.is_empty m.path then m else { m with path = m.path @ [ dst ] }
+      (* Only allow extending if [dst] is a valid next step from [path] *)
+      if List.is_empty m.path
+      then m
+      else (
+        let nexts = Game_state.next_steps_from_path m.game_state ~path:m.path in
+        if List.mem nexts dst ~equal:pos_equal
+        then { m with path = m.path @ [ dst ] }
+        else m)
     | Confirm_path ->
       if List.length m.path < 2
       then m
@@ -139,14 +147,14 @@ module Ui = struct
     let cells = Map.to_alist st.board in
     let bounds = Layout.uniform_bounds cells in
     let fit = 0.88 in
-    (* more breathing space from the rect edges *)
+    (* more padding from the rectangle edges *)
     let cell_scale = 0.82 in
-    (* smaller board circles *)
+    (* smaller visual circles within each cell *)
     let cell_w, cell_h = Layout.cell_size_pct ~bounds ~fit ~cell_scale in
     (* Next steps from staged path (respects hop-vs-adjacent rule) *)
     let next_steps = Game_state.next_steps_from_path st ~path:model.path in
     let is_next pos = List.mem next_steps pos ~equal:pos_equal in
-    (* Moving overlay at the head of the staged path *)
+    (* Moving overlay at the head of the staged path (speculative move) *)
     let moving_owner, moving_head =
       match model.path with
       | start :: _ ->
@@ -164,7 +172,7 @@ module Ui = struct
         | Error _ -> false)
       else false
     in
-    (* Turn tints on BOTH the outer rectangle and the inner board for clarity *)
+    (* Turn tint on container class *)
     let turn_class =
       match st.decision with
       | Decision.In_progress { whose_turn } -> class_of_player whose_turn
@@ -175,12 +183,13 @@ module Ui = struct
       let x, y = Layout.xy_of_axial (pos.q_coordinate, pos.r_coordinate) in
       let left_pct, top_pct = Layout.normalize ~bounds ~fit (x, y) in
       let alt = (pos.q_coordinate + pos.r_coordinate) land 1 = 0 in
-      (* Hide base piece if it’s the start of a staged path *)
+      (* Hide base piece if it's the start of a staged path *)
       let is_path_start =
         match model.path with
         | s :: _ -> pos_equal s pos
         | _ -> false
       in
+      (* Base (non-moving) piece *)
       let base_piece =
         match occ with
         | None -> Vdom.Node.none
