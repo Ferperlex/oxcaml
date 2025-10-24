@@ -32,7 +32,7 @@ body {
   --color-F: #ef4444; /* red */
 
   /* light tints for board background per turn (clearly visible, not “white-ish”) */
-  --tint-A: #ffe1c4;  /* pale blue */
+  --tint-A: #fae1c9;  /* pale blue */
   --tint-B: #dceafe;  /* pale orange */
   --tint-C: #cff7e6;  /* pale green/teal */
   --tint-D: #d3d3d3;  /* pale amber */
