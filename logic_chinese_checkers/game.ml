@@ -286,48 +286,66 @@ module Game_state = struct
     | false -> pos_mem (forbidden_for st p) dest
   ;;
 
-  let next_step_options (st : t) ~(path : Cell_position.t list) : Cell_position.t list =
-    let dedup_sort xs = List.dedup_and_sort xs ~compare:Cell_position.compare in
-    match st.decision with
-    | Winner _ -> []
-    | In_progress { whose_turn } ->
-      let hop_landings_from (pos : Cell_position.t) ~(visited : Cell_position.t list) =
+  (* What cells can the selected piece move to next, given the partial path so far? *)
+  type step_options =
+    { adjacents : Cell_position.t list
+    ; hops : Cell_position.t list
+    }
+
+  let next_step_options (st : t) ~(start : Cell_position.t) ~(path : Cell_position.t list)
+    : step_options
+    =
+    let curr =
+      match List.last path with
+      | Some x -> x
+      | None -> start
+    in
+    let visited = path in
+    let was_adjacent_first =
+      match path with
+      | a :: b :: _ ->
+        (match step_kind ~from_:a ~to_:b with
+         | `Adjacent -> true
+         | _ -> false)
+      | _ -> false
+    in
+    let first_step_taken = List.length path >= 2 in
+    (* Adjacent options are allowed only if we haven't started hopping yet
+       (and only at the very first step). *)
+    let adjacents =
+      if first_step_taken
+      then []
+      else
+        directions
+        |> List.filter_map ~f:(fun dir ->
+          let dst = neighbor curr dir in
+          match Map.find st.board dst with
+          | Some None -> Some dst
+          | _ -> None)
+    in
+    (* Hop options:
+       - landing must be empty
+       - mid must be occupied
+       - cannot revisit a cell already in the path
+       - if we started with an adjacent step, no hops allowed afterward *)
+    let hops =
+      if was_adjacent_first
+      then []
+      else
         directions
         |> List.filter_map ~f:(fun (dq, dr) ->
-          let mid = neighbor pos (dq, dr) in
-          let jump = neighbor pos (2 * dq, 2 * dr) in
-          match occupied st.board mid, landing_empty st.board jump with
-          | `Occupied, `Empty when not (List.mem visited jump ~equal:pos_equal) ->
-            Some jump
+          let mid = neighbor curr (dq, dr) in
+          let jump = neighbor curr (2 * dq, 2 * dr) in
+          match Map.find st.board mid, Map.find st.board jump with
+          | Some (Some _), Some None ->
+            if
+              List.mem visited jump ~equal:(fun a b ->
+                Int.equal (Cell_position.compare a b) 0)
+            then None
+            else Some jump
           | _ -> None)
-      in
-      (match path with
-       | [] -> []
-       | [ start ] ->
-         (* First step can be either adjacent (final) or a single hop (may extend). *)
-         let adjacents =
-           directions
-           |> List.filter_map ~f:(fun dir ->
-             let dst = neighbor start dir in
-             match landing_empty st.board dst with
-             | `Empty ->
-               (* Adjacent move would be final; filter out forbidden landings here
-                    to avoid offering illegal single-steps. *)
-               if is_forbidden_landing st whose_turn dst then None else Some dst
-             | _ -> None)
-         in
-         let hops = hop_landings_from start ~visited:[ start ] in
-         dedup_sort (adjacents @ hops)
-       | a :: b :: _ ->
-         (* Determine if the first segment was an adjacent or a hop. *)
-         (match step_kind ~from_:a ~to_:b with
-          | `Adjacent ->
-            (* After an adjacent step you cannot extend; must confirm/cancel. *)
-            []
-          | `Invalid -> []
-          | `Hop_over _ ->
-            let curr = last_exn path in
-            hop_landings_from curr ~visited:path |> dedup_sort))
+    in
+    { adjacents; hops }
   ;;
 
   let is_move_valid (st : t) (mv : Move.t) : unit Or_error.t =

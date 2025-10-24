@@ -18,108 +18,69 @@ body {
   display: grid;
   place-items: center;
   overflow: hidden;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans";
 }
 
-/* ---------- game container fills the shorter screen side ---------- */
+/* ---------- game container fills any screen and stays square ---------- */
 .game {
-  width: 98vmin;               /* vmin keeps it square on any screen */
+  width: 98vmin;
   height: 98vmin;
   max-width: 100vw;
   max-height: 100vh;
   position: relative;
 }
 
-/* ---------- HUD (top overlay) ---------- */
-.hud {
-  position: absolute;
-  top: 1.25vmin;
-  left: 1.25vmin;
-  right: 1.25vmin;
-  display: flex;
-  align-items: center;
-  gap: 1.25vmin;
-  pointer-events: none;        /* purely informational */
-  z-index: 3;
-}
-.turn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.9vmin;
-  font-size: clamp(12px, 2vmin, 18px);
-  opacity: 0.9;
-}
-.turn-dot {
-  width: 2.2vmin;
-  height: 2.2vmin;
-  border-radius: 50%;
-  box-shadow: 0 0 0.6vmin rgba(0,0,0,0.35), 0 0 0 0.25vmin rgba(255,255,255,0.08) inset;
-}
-.turn-dot--A { background: #e74c3c; }  /* red */
-.turn-dot--B { background: #3498db; }  /* blue */
-.turn-dot--C { background: #2ecc71; }  /* green */
-.turn-dot--D { background: #f1c40f; }  /* yellow */
-.turn-dot--E { background: #9b59b6; }  /* purple */
-.turn-dot--F { background: #e67e22; }  /* orange */
-
-/* ---------- the board area (square) ---------- */
+/* ---------- the board area ---------- */
 .board {
   position: absolute;
-  inset: 0;                    /* fill .game */
+  inset: 0;
   border-radius: 1.25vmin;
   background: radial-gradient(120% 120% at 50% 10%, #1a222c 0%, #0f141a 80%);
   box-shadow: 0 1.5vmin 4vmin rgba(0,0,0,0.55) inset, 0 0 0 0.15vmin rgba(255,255,255,0.05) inset;
+  overflow: hidden;
 }
 
-/* ---------- cells (hex centers) ---------- */
+/* ---------- hex centers (positioned anchors) ---------- */
 .cell {
   position: absolute;
-  /* your Bonsai code sets left/top as the center of the hex; center the element there */
-  transform: translate(-50%, -50%);
-  display: grid;
-  place-items: center;
-  border-radius: 8%;
-  transition: filter 120ms ease, box-shadow 120ms ease, transform 80ms ease;
-  /* subtle checkerboard to help depth perception */
-  background: rgba(255,255,255,0.02);
-  box-shadow: 0 0 0 0.1vmin rgba(255,255,255,0.03) inset;
-}
-.cell--alt {
-  background: rgba(255,255,255,0.035);
+  transform: translate(-50%, -50%); /* center at computed hex center */
 }
 
-/* selection guidance */
-.cell--legal {
+/* ---------- circular slot (click target) ---------- */
+.slot {
+  width: 78%;
+  height: 78%;
+  border-radius: 50%;
+  margin: auto;
+  background: rgba(255,255,255,0.03);
+  box-shadow: 0 0 0 0.15vmin rgba(255,255,255,0.05) inset;
+}
+.slot--legal {
   cursor: pointer;
   box-shadow:
-    0 0 0 0.22vmin rgba(255,255,255,0.07) inset,
-    0 0 0.8vmin rgba(125, 215, 255, 0.25);
-  filter: saturate(1.05) brightness(1.03);
-}
-.cell--legal:hover {
-  box-shadow:
-    0 0 0 0.25vmin rgba(255,255,255,0.10) inset,
+    0 0 0 0.22vmin rgba(255,255,255,0.09) inset,
     0 0 1.2vmin rgba(125, 215, 255, 0.35);
-  filter: saturate(1.12) brightness(1.06);
+}
+.slot--legal:hover {
+  box-shadow:
+    0 0 0 0.26vmin rgba(255,255,255,0.13) inset,
+    0 0 1.6vmin rgba(125, 215, 255, 0.45);
 }
 
-/* start/goal tint layers (very subtle) */
-.cell[class*="cell--start-"] { background-image: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)); }
-.cell[class*="cell--goal-"]  { background-image: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03)); }
-
-/* start/goal by player (subtle outline) */
-.cell--start-A, .cell--goal-A { box-shadow: 0 0 0 0.18vmin rgba(231, 76, 60, 0.35) inset; }
-.cell--start-B, .cell--goal-B { box-shadow: 0 0 0 0.18vmin rgba(52, 152, 219, 0.35) inset; }
-.cell--start-C, .cell--goal-C { box-shadow: 0 0 0 0.18vmin rgba(46, 204, 113, 0.35) inset; }
-.cell--start-D, .cell--goal-D { box-shadow: 0 0 0 0.18vmin rgba(241, 196, 15, 0.35) inset; }
-.cell--start-E, .cell--goal-E { box-shadow: 0 0 0 0.18vmin rgba(155, 89, 182, 0.35) inset; }
-.cell--start-F, .cell--goal-F { box-shadow: 0 0 0 0.18vmin rgba(230, 126, 34, 0.35) inset; }
+/* start/goal tints (very subtle per player) */
+.slot.cell--start-A, .slot.cell--goal-A { box-shadow: 0 0 0 0.18vmin rgba(231, 76, 60, 0.35) inset; }
+.slot.cell--start-B, .slot.cell--goal-B { box-shadow: 0 0 0 0.18vmin rgba(52, 152, 219, 0.35) inset; }
+.slot.cell--start-C, .slot.cell--goal-C { box-shadow: 0 0 0 0.18vmin rgba(46, 204, 113, 0.35) inset; }
+.slot.cell--start-D, .slot.cell--goal-D { box-shadow: 0 0 0 0.18vmin rgba(241, 196, 15, 0.35) inset; }
+.slot.cell--start-E, .slot.cell--goal-E { box-shadow: 0 0 0 0.18vmin rgba(155, 89, 182, 0.35) inset; }
+.slot.cell--start-F, .slot.cell--goal-F { box-shadow: 0 0 0 0.18vmin rgba(230, 126, 34, 0.35) inset; }
 
 /* ---------- pieces ---------- */
 .piece {
-  width: 72%;
-  height: 72%;
+  width: 64%;
+  height: 64%;
   border-radius: 50%;
+  margin: auto;
   box-shadow:
     0 0.45vmin 1.25vmin rgba(0,0,0,0.55),
     0 0 0 0.2vmin rgba(0,0,0,0.35) inset,
@@ -133,11 +94,11 @@ body {
 .piece--F { background: #e67e22; }
 
 .piece--selected {
-  outline: 0.35vmin solid rgba(255,255,255,0.75);
+  outline: 0.35vmin solid rgba(255,255,255,0.85);
   filter: brightness(1.08);
 }
 
-/* ---------- confirm bar (shown only when a multi-hop path is in progress) ---------- */
+/* ---------- confirm/cancel bar (visible inside board) ---------- */
 .confirm-bar {
   position: absolute;
   left: 50%;
@@ -154,7 +115,6 @@ body {
   z-index: 3;
 }
 
-/* buttons */
 .btn {
   appearance: none;
   border: 0;
@@ -170,20 +130,5 @@ body {
 .btn:hover { filter: brightness(1.04); }
 .btn:active { transform: translateY(0.15vmin); }
 
-.btn--confirm {
-  background: #2ecc71;
-  color: #0f141a;
-}
-.btn--reset {
-  background: #95a5a6;
-  color: #0f141a;
-}
-
-/* optional: visual breadcrumb for the current hop path */
-.path-dot {
-  width: 1vmin;
-  height: 1vmin;
-  border-radius: 50%;
-  background: #7dd7ff;
-  box-shadow: 0 0 0.8vmin rgba(125,215,255,0.5);
-}
+.btn--confirm { background: #2ecc71; color: #0f141a; }
+.btn--reset   { background: #95a5a6; color: #0f141a; }
