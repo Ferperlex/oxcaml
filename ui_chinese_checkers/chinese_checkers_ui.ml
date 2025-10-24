@@ -15,6 +15,7 @@ module Layout = struct
   let xy_of_axial (q, r) =
     let qf = Float.of_int q
     and rf = Float.of_int r in
+    (* flat-topped axial to pixel *)
     let x = 1.5 *. size *. qf in
     let y = Float.sqrt 3.0 *. size *. (rf +. (qf /. 2.0)) in
     x, y
@@ -32,10 +33,11 @@ module Layout = struct
       List.map cells ~f:(fun (pos, _) -> xy_of_axial (pos.q_coordinate, pos.r_coordinate))
       |> List.unzip
     in
-    let min_x = Option.value (List.min_elt xs ~compare:Float.compare) ~default:0. in
-    let max_x = Option.value (List.max_elt xs ~compare:Float.compare) ~default:1. in
-    let min_y = Option.value (List.min_elt ys ~compare:Float.compare) ~default:0. in
-    let max_y = Option.value (List.max_elt ys ~compare:Float.compare) ~default:1. in
+    let min_x = List.min_elt xs ~compare:Float.compare |> Option.value ~default:0. in
+    let max_x = List.max_elt xs ~compare:Float.compare |> Option.value ~default:1. in
+    let min_y = List.min_elt ys ~compare:Float.compare |> Option.value ~default:0. in
+    let max_y = List.max_elt ys ~compare:Float.compare |> Option.value ~default:1. in
+    (* expand by half hex so the outer cells fit fully *)
     { min_x = min_x -. half_w
     ; max_x = max_x +. half_w
     ; min_y = min_y -. half_h
@@ -58,6 +60,7 @@ end
 
 (* ---------- Small helpers ---------- *)
 let pos_equal a b = Int.equal (Cell_position.compare a b) 0
+(* let last_exn xs = Option.value_exn (List.last xs) *)
 
 let class_of_player = function
   | Player_kind.A -> "A"
@@ -68,52 +71,83 @@ let class_of_player = function
   | F -> "F"
 ;;
 
+let classes xs = Vdom.Attr.class_ (String.concat ~sep:" " xs)
+
 (* ---------- Bonsai UI ---------- *)
 module Ui = struct
   type model =
     { game_state : Game_state.t
-    ; path : Cell_position.t list (* [] = no selection; [start; ...steps...] otherwise *)
+    ; selection : Cell_position.t option
+    ; path : Cell_position.t list (* move being constructed; [] = none *)
     }
   [@@deriving equal, sexp]
 
-  let initial_model game_state = { game_state; path = [] }
+  let initial_model game_state = { game_state; selection = None; path = [] }
 
   type action =
-    | Select_start of Cell_position.t
-    | Add_step of Cell_position.t
-    | Confirm_path
-    | Cancel_path
+    | Click_cell of Cell_position.t
+    | Confirm_move
+    | Cancel_move
+
+  let rec auto_skip_if_needed (st : Game_state.t) : Game_state.t =
+    match st.decision with
+    | Decision.Winner _ -> st
+    | Decision.In_progress _ ->
+      if Game_state.has_any_legal_moves st
+      then st
+      else auto_skip_if_needed (Game_state.skip_turn st)
+  ;;
 
   let apply_action (model : model) (action : action) : model =
     let st = model.game_state in
     match action with
-    | Cancel_path -> { model with path = [] }
-    | Select_start pos ->
-      (* Only allow selecting a piece that belongs to the current player *)
-      (match st.decision with
-       | Decision.Winner _ -> model
-       | Decision.In_progress { whose_turn } ->
-         (match Map.find st.board pos with
-          | Some (Some who) when Player_kind.equal who whose_turn ->
-            { model with path = [ pos ] }
-          | _ -> model))
-    | Add_step dst ->
+    | Cancel_move -> { model with selection = None; path = [] }
+    | Confirm_move ->
       (match model.path with
-       | [] -> model
-       | start :: _ ->
-         let { Game_state.adjacents; hops } =
-           Game_state.next_step_options st ~start ~path:model.path
-         in
-         if List.mem adjacents dst ~equal:pos_equal || List.mem hops dst ~equal:pos_equal
-         then { model with path = model.path @ [ dst ] }
-         else model)
-    | Confirm_path ->
-      (match model.path with
-       | mv when List.length mv >= 2 ->
-         (match Game_state.is_move_valid st mv, Game_state.make_move st mv with
-          | Ok (), Ok st' -> { game_state = st'; path = [] }
-          | _ -> { model with path = [] })
-       | _ -> model)
+       | _ :: _ :: _ as mv ->
+         (match Game_state.make_move model.game_state mv with
+          | Error _ ->
+            (* illegal => just reset; user can try again *)
+            { model with selection = None; path = [] }
+          | Ok st' ->
+            let st'' = auto_skip_if_needed st' in
+            { game_state = st''; selection = None; path = [] })
+       | _ ->
+         (* nothing to confirm *)
+         model)
+    | Click_cell pos ->
+      (* Helper to compute legal next-steps for the current path *)
+      let legal_next () =
+        match model.path with
+        | [] -> []
+        | path -> Game_state.next_steps_from_path st ~path
+      in
+      (match model.selection, model.path with
+       | None, _ ->
+         (* select a piece if it belongs to side-to-move *)
+         (match Map.find st.board pos, st.decision with
+          | Some (Some who), Decision.In_progress { whose_turn }
+            when Player_kind.equal who whose_turn ->
+            { model with selection = Some pos; path = [ pos ] }
+          | _ -> model)
+       | Some start, (_ :: _ as path) ->
+         (* If clicked one of the legal next-steps, extend the path *)
+         if List.mem (legal_next ()) pos ~equal:pos_equal
+         then { model with path = path @ [ pos ] }
+         else if pos_equal pos start
+         then
+           (* Re-click on start toggles cancel *)
+           { model with selection = None; path = [] }
+         else (
+           (* Clicking a different own piece restarts selection, otherwise ignore *)
+           match Map.find st.board pos, st.decision with
+           | Some (Some who), Decision.In_progress { whose_turn }
+             when Player_kind.equal who whose_turn ->
+             { model with selection = Some pos; path = [ pos ] }
+           | _ -> model)
+       | Some _, [] ->
+         (* Shouldn't happen: selection with empty path *)
+         { model with selection = None; path = [] })
   ;;
 
   let view (model : model) ~(inject : action -> unit Ui_effect.t) : Vdom.Node.t =
@@ -121,46 +155,70 @@ module Ui = struct
     let cells = Map.to_alist st.board in
     let bbox = Layout.bbox_of_cells cells in
     let cell_w, cell_h = Layout.cell_size_pct ~bbox in
-    (* compute step options for current path *)
-    let next_opts =
+    (* Legal NEXT steps for the in-progress path *)
+    let legal_nexts =
       match model.path with
-      | [] -> None
-      | start :: _ -> Some (Game_state.next_step_options st ~start ~path:model.path)
+      | [] -> []
+      | path -> Game_state.next_steps_from_path st ~path
     in
-    let is_legal_next pos =
-      match next_opts with
-      | None -> false
-      | Some { Game_state.adjacents; hops } ->
-        List.mem adjacents pos ~equal:pos_equal || List.mem hops pos ~equal:pos_equal
+    (* Build overlay classes for start/goal zones across all players *)
+    let start_goal_classes (pos : Cell_position.t) =
+      let per_p (p : Player_kind.t) =
+        let start_zone =
+          Game_state.start_triangle_for_player ~number_of_players:st.number_of_players p
+        in
+        let in_start = List.mem start_zone pos ~equal:pos_equal in
+        let in_goal = List.mem (Game_state.goals_for st p) pos ~equal:pos_equal in
+        (if in_start then [ "cell--start-" ^ class_of_player p ] else [])
+        @ if in_goal then [ "cell--goal-" ^ class_of_player p ] else []
+      in
+      Game_state.players_in_game st.number_of_players |> List.concat_map ~f:per_p
     in
-    (* Render a single cell (as circular “slot”) and a piece if present *)
+    (* Render a single hex cell + optional piece *)
     let render_cell ((pos : Cell_position.t), occ) =
       let x, y = Layout.xy_of_axial (pos.q_coordinate, pos.r_coordinate) in
       let left_pct, top_pct = Layout.normalize ~bbox (x, y) in
-      let zone_classes =
-        let per_p p =
-          let in_start =
-            List.mem
-              (Game_state.start_triangle_for_player
-                 ~number_of_players:st.number_of_players
-                 p)
-              pos
-              ~equal:pos_equal
+      let alt = (pos.q_coordinate + pos.r_coordinate) land 1 = 0 in
+      (* Piece node if occupied *)
+      let piece =
+        match occ with
+        | None -> Vdom.Node.none
+        | Some who ->
+          let is_turn =
+            match st.decision with
+            | Decision.In_progress { whose_turn } -> Player_kind.equal whose_turn who
+            | Decision.Winner _ -> false
           in
-          let in_goal = List.mem (Game_state.goals_for st p) pos ~equal:pos_equal in
-          (if in_start then [ "cell--start-" ^ class_of_player p ] else [])
-          @ if in_goal then [ "cell--goal-" ^ class_of_player p ] else []
-        in
-        Game_state.players_in_game st.number_of_players |> List.concat_map ~f:per_p
+          let is_selected =
+            match model.selection with
+            | Some s -> pos_equal s pos
+            | None -> false
+          in
+          let piece_classes =
+            [ "piece"; "piece--" ^ class_of_player who ]
+            @ (if is_turn then [ "piece--clickable" ] else [])
+            @ if is_selected then [ "piece--selected" ] else []
+          in
+          let click_attr =
+            if is_turn
+            then Vdom.Attr.on_click (fun _ -> inject (Click_cell pos))
+            else Vdom.Attr.empty
+          in
+          Vdom.Node.div ~attrs:[ classes piece_classes; click_attr ] []
       in
-      (* circular slot we click on to extend the path *)
-      let slot_classes =
-        [ "slot" ] @ zone_classes @ if is_legal_next pos then [ "slot--legal" ] else []
-      in
-      let slot_click =
-        if is_legal_next pos
-        then Vdom.Attr.on_click (fun _ -> inject (Add_step pos))
+      (* If this cell is a legal next step for current path, clicking it extends the path *)
+      let dest_click_attr =
+        if List.mem legal_nexts pos ~equal:pos_equal
+        then Vdom.Attr.on_click (fun _ -> inject (Click_cell pos))
         else Vdom.Attr.empty
+      in
+      let zone = start_goal_classes pos in
+      let cell_classes =
+        [ "cell"
+        ; (if alt then "cell--alt" else "")
+        ; (if List.mem legal_nexts pos ~equal:pos_equal then "cell--legal" else "")
+        ]
+        @ zone
       in
       let style =
         Css_gen.(
@@ -169,67 +227,47 @@ module Ui = struct
           @> width (`Percent (Percent.of_percentage cell_w))
           @> height (`Percent (Percent.of_percentage cell_h)))
       in
-      (* piece node (stays at its real board position until confirm) *)
-      let piece =
-        match occ with
-        | None -> Vdom.Node.none
-        | Some who ->
-          let highlighted =
-            match model.path with
-            | start :: _ when pos_equal start pos -> [ "piece--selected" ]
-            | _ -> []
-          in
-          Vdom.Node.div
-            ~attrs:
-              [ Vdom.Attr.classes
-                  ([ "piece"; "piece--" ^ class_of_player who ] @ highlighted)
-              ]
-            []
-      in
-      (* allow selecting your own piece by clicking the piece itself *)
-      let piece_select_attr =
-        match st.decision, occ with
-        | Decision.In_progress { whose_turn }, Some who
-          when Player_kind.equal who whose_turn ->
-          Vdom.Attr.on_click (fun _ -> inject (Select_start pos))
-        | _ -> Vdom.Attr.empty
-      in
       Vdom.Node.div
-        ~attrs:[ Vdom.Attr.class_ "cell"; Vdom.Attr.style style ]
-        [ Vdom.Node.div ~attrs:[ Vdom.Attr.classes slot_classes; slot_click ] []
-        ; Vdom.Node.div ~attrs:[ piece_select_attr ] [ piece ]
-        ]
+        ~attrs:[ classes cell_classes; Vdom.Attr.style style; dest_click_attr ]
+        [ piece ]
     in
-    (* confirm/cancel bar appears only if we have at least one step chosen *)
-    let show_confirm =
+    (* HUD: Confirm / Cancel when a move path has at least two positions *)
+    let hud =
+      let can_confirm =
+        match model.path with
+        | _ :: _ :: _ ->
+          (match Game_state.is_move_valid st model.path with
+           | Ok () -> true
+           | Error _ -> false)
+        | _ -> false
+      in
+      let confirm_btn =
+        Vdom.Node.button
+          ~attrs:
+            [ Vdom.Attr.class_ "btn btn--confirm"
+            ; (if can_confirm
+               then Vdom.Attr.on_click (fun _ -> inject Confirm_move)
+               else Vdom.Attr.create "disabled" "")
+            ]
+          [ Vdom.Node.text "Confirm" ]
+      in
+      let cancel_btn =
+        Vdom.Node.button
+          ~attrs:
+            [ Vdom.Attr.class_ "btn btn--cancel"
+            ; Vdom.Attr.on_click (fun _ -> inject Cancel_move)
+            ]
+          [ Vdom.Node.text "Cancel" ]
+      in
+      (* Only show when there's an active path (>=1 step). Cancel should always appear once selected *)
       match model.path with
-      | _ :: _ :: _ -> true
-      | _ -> false
-    in
-    let confirm_bar =
-      if show_confirm
-      then
-        Vdom.Node.div
-          ~attrs:[ Vdom.Attr.class_ "confirm-bar" ]
-          [ Vdom.Node.button
-              ~attrs:
-                [ Vdom.Attr.classes [ "btn"; "btn--confirm" ]
-                ; Vdom.Attr.on_click (fun _ -> inject Confirm_path)
-                ]
-              [ Vdom.Node.text "Confirm move" ]
-          ; Vdom.Node.button
-              ~attrs:
-                [ Vdom.Attr.classes [ "btn"; "btn--reset" ]
-                ; Vdom.Attr.on_click (fun _ -> inject Cancel_path)
-                ]
-              [ Vdom.Node.text "Cancel" ]
-          ]
-      else Vdom.Node.none
+      | [] | [ _ ] -> Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "hud" ] []
+      | _ -> Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "hud" ] [ confirm_btn; cancel_btn ]
     in
     Vdom.Node.div
       ~attrs:[ Vdom.Attr.class_ "game" ]
-      [ Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "board" ] (List.map cells ~f:render_cell)
-      ; confirm_bar
+      [ hud
+      ; Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "board" ] (List.map cells ~f:render_cell)
       ]
   ;;
 
@@ -243,13 +281,19 @@ module Ui = struct
     in
     let%arr model = model
     and set_model = set_model in
-    let inject a = set_model (apply_action model a) in
+    let inject a =
+      let next = apply_action model a in
+      set_model next
+    in
     view model ~inject
   ;;
 end
 
+(* Entry point used by Bonsai_web.Start.start *)
 let app =
-  let initial_state = Game_state.create ~number_of_players:2 |> Or_error.ok_exn in
+  let initial_state =
+    Game_state.create ~number_of_players:2 |> Or_error.ok_exn |> Ui.auto_skip_if_needed
+  in
   Ui.component ~initial_state
 ;;
 

@@ -96,7 +96,7 @@ body {
 /* ===== Board canvas ===== */
 .board {
   position: absolute;
-  inset: 0;
+  inset: 1.2vmin;
   border-radius: 2vmin;
   overflow: hidden;  /* keep everything inside rounded corners */
   /* Subtle panel gradient + vignette */

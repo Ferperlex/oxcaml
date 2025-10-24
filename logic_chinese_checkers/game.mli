@@ -53,6 +53,7 @@ module Game_state : sig
 
   val create : number_of_players:int -> t Or_error.t
   val goals_for : t -> Player_kind.t -> Cell_position.t list
+  val next_steps_from_path : t -> path:Cell_position.t list -> Cell_position.t list
 
   val next_step_options
     :  t
