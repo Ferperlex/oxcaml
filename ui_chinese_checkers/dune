@@ -1,0 +1,6 @@
+(executables
+ (modes js)
+ (names chinese_checkers_ui)
+ (libraries bonsai.web core virtual_dom chinese_checkers_logic_library)
+ (preprocess
+  (pps ppx_jane bonsai.ppx_bonsai)))

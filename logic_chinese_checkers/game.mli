@@ -8,15 +8,15 @@ module Player_kind : sig
     | D
     | E
     | F
-  [@@deriving sexp]
+  [@@deriving sexp, equal]
 end
 
 module Cell_position : sig
-  (* CR: write comment explaining coordinate system *)
   type t =
     { q_coordinate : int
     ; r_coordinate : int
     }
+  [@@deriving sexp, compare]
 
   include Comparable.S with type t := t
 end
@@ -29,7 +29,7 @@ module Decision : sig
 end
 
 module Move : sig
-  type t = Cell_position.t list [@@deriving sexp, compare]
+  type t = Cell_position.t list [@@deriving sexp, compare, equal]
 end
 
 module Game_state : sig
@@ -39,9 +39,16 @@ module Game_state : sig
     ; decision : Decision.t
     ; goals : (Player_kind.t * Cell_position.t list) list
     }
-  [@@deriving sexp]
+  [@@deriving sexp, equal]
+
+  val start_triangle_for_player
+    :  number_of_players:int
+    -> Player_kind.t
+    -> Cell_position.t list
 
   val create : number_of_players:int -> t Or_error.t
+  val goals_for : t -> Player_kind.t -> Cell_position.t list
+  val players_in_game : int -> Player_kind.t list
   val all_legal_moves : t -> Move.t list
   val skip_turn : t -> t
   val has_any_legal_moves : t -> bool

@@ -28,11 +28,11 @@ module Decision = struct
   type t =
     | In_progress of { whose_turn : Player_kind.t }
     | Winner of Player_kind.t
-  [@@deriving sexp]
+  [@@deriving sexp, equal]
 end
 
 module Move = struct
-  type t = Cell_position.t list [@@deriving sexp, compare]
+  type t = Cell_position.t list [@@deriving sexp, compare, equal]
 end
 
 module Game_state = struct
@@ -42,7 +42,7 @@ module Game_state = struct
     ; decision : Decision.t
     ; goals : (Player_kind.t * Cell_position.t list) list
     }
-  [@@deriving sexp]
+  [@@deriving sexp, equal]
 
   let create_empty_board () =
     let valid q r =

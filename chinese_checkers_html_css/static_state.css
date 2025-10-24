@@ -1,0 +1,118 @@
+/* ===== base/layout ===== */
+html, body {
+  margin: 0; padding: 0;
+  width: 100vw; height: 100vh;
+  position: fixed !important;
+  overflow: hidden;
+  background: #0f1115;
+  color: #e9eef5;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue";
+}
+* {
+  box-sizing: border-box;
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  outline: 0;
+}
+textarea, input { -webkit-user-select: text !important; user-select: text !important; }
+
+/* Game area is centered & square */
+.game {
+  width: min(100vw, 100vh);
+  height: min(100vw, 100vh);
+  aspect-ratio: 1;
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: radial-gradient(58% 60% at 50% 38%, #151a26 0%, #0c111b 62%, #090d14 100%);
+}
+
+/* HUD row (turn, buttons) */
+.hud {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 10px 12px;
+  color: #a7b3c4; font-weight: 600; font-size: 14px;
+}
+.hud .right { display: inline-flex; gap: 8px; align-items: center; }
+
+/* Board surface (absolute children are hexes) */
+.board {
+  position: relative;
+  margin: 8px;
+  border-radius: 14px;
+  box-shadow:
+    inset 0 0 0 1px #1b2540,
+    0 24px 60px rgba(0,0,0,0.35);
+}
+
+/* ===== hex cells (flat-topped) ===== */
+.cell {
+  position: absolute;
+  /* width/height are set per-cell via style (percentages), but shape = hex: */
+  background: #1a2030;
+  border: 1px solid #2a3550;
+  clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+  transition: transform 160ms, background 160ms, box-shadow 160ms;
+}
+.cell--alt { background: #1e2638; }
+.cell--hoverable:hover { transform: translateY(-1.5%); box-shadow: 0 0 0 2px rgba(120,165,255,.15); }
+
+/* zone tints */
+.cell--start-A { background: color-mix(in oklab, #1a2030 75%, #ff9a9a); }
+.cell--goal-A  { background: color-mix(in oklab, #1a2030 55%, #ff9a9a); }
+.cell--start-B { background: color-mix(in oklab, #1a2030 75%, #9fd3ff); }
+.cell--goal-B  { background: color-mix(in oklab, #1a2030 55%, #9fd3ff); }
+.cell--start-C { background: color-mix(in oklab, #1a2030 75%, #ffe899); }
+.cell--goal-C  { background: color-mix(in oklab, #1a2030 55%, #ffe899); }
+.cell--start-D { background: color-mix(in oklab, #1a2030 75%, #bfe8b0); }
+.cell--goal-D  { background: color-mix(in oklab, #1a2030 55%, #bfe8b0); }
+.cell--start-E { background: color-mix(in oklab, #1a2030 75%, #ffc2a3); }
+.cell--goal-E  { background: color-mix(in oklab, #1a2030 55%, #ffc2a3); }
+.cell--start-F { background: color-mix(in oklab, #1a2030 75%, #b3c4d8); }
+.cell--goal-F  { background: color-mix(in oklab, #1a2030 55%, #b3c4d8); }
+
+.cell--legal { box-shadow: inset 0 0 0 2px #23c983, 0 0 10px rgba(35,201,131,.18); }
+.cell--forbidden { box-shadow: inset 0 0 0 2px #ff5d5d; }
+
+/* ===== pieces ===== */
+.piece {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  width: 62%; height: 62%;
+  border-radius: 50%;
+  box-shadow:
+    0 6px 14px rgba(0,0,0,.35),
+    inset 0 5px 8px rgba(255,255,255,.25),
+    inset 0 -9px 12px rgba(0,0,0,.28);
+  border: 2px solid rgba(255,255,255,.55);
+}
+.piece--A { background: #f94144; }
+.piece--B { background: #277da1; }
+.piece--C { background: #f9c74f; }
+.piece--D { background: #90be6d; }
+.piece--E { background: #f3722c; }
+.piece--F { background: #577590; }
+
+.piece--selected {
+  transform: translate(-50%, -50%) scale(1.08);
+  box-shadow:
+    0 12px 26px rgba(0,0,0,.45),
+    0 0 0 3px rgba(120,165,255,.28),
+    inset 0 6px 10px rgba(255,255,255,.35),
+    inset 0 -10px 16px rgba(0,0,0,.32);
+}
+
+/* ===== micro UI ===== */
+.btn {
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid #1f2a45;
+  background: #0e1524;
+  color: #dfe7f5;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn:disabled { opacity: .4; cursor: default; }
+
+.slowly_appear { animation: slowly_appear .35s ease-out; }
+@keyframes slowly_appear { from { opacity:.1; transform: translateY(6px); } to { opacity:1; transform: translateY(0); } }
