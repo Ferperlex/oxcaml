@@ -41,10 +41,12 @@ module Game_state : sig
     }
   [@@deriving sexp, equal]
 
-  type step_options =
-    { adjacents : Cell_position.t list
-    ; hops : Cell_position.t list
-    }
+  module Step_options : sig
+    type t =
+      { adjacents : Cell_position.t list
+      ; hops : Cell_position.t list
+      }
+  end
 
   val start_triangle_for_player
     :  number_of_players:int
@@ -59,7 +61,7 @@ module Game_state : sig
     :  t
     -> start:Cell_position.t
     -> path:Cell_position.t list
-    -> step_options
+    -> Step_options.t
 
   val is_move_valid : t -> Move.t -> unit Or_error.t
   val players_in_game : int -> Player_kind.t list

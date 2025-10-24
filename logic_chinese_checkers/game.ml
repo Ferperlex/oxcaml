@@ -68,8 +68,6 @@ module Game_state = struct
       Map.set acc ~key ~data:None)
   ;;
 
-  (* ---------- tip triangles (lists) ---------- *)
-
   let invert_coordinate_signs cells =
     List.map cells ~f:(fun { Cell_position.q_coordinate; r_coordinate } ->
       { Cell_position.q_coordinate = -q_coordinate; r_coordinate = -r_coordinate })
@@ -275,9 +273,6 @@ module Game_state = struct
   let pos_equal a b = Int.equal (Cell_position.compare a b) 0
   let pos_mem lst x = List.mem lst x ~equal:pos_equal
 
-  (* Final-landing rule with exception:
-     - forbidden if in an opponent's goal
-     - allowed if that hex is also in the mover's own start triangle *)
   let is_forbidden_landing (st : t) (p : Player_kind.t) (dest : Cell_position.t) : bool =
     match
       pos_mem (start_triangle_for_player ~number_of_players:st.number_of_players p) dest
@@ -286,13 +281,13 @@ module Game_state = struct
     | false -> pos_mem (forbidden_for st p) dest
   ;;
 
-  (* What cells can the selected piece move to next, given the partial path so far? *)
-  type step_options =
-    { adjacents : Cell_position.t list
-    ; hops : Cell_position.t list
-    }
+  module Step_options = struct
+    type t =
+      { adjacents : Cell_position.t list
+      ; hops : Cell_position.t list
+      }
+  end
 
-  (* ---------- UI helper: legal NEXT steps for an in-progress path ---------- *)
   let next_steps_from_path (st : t) ~(path : Cell_position.t list) : Cell_position.t list =
     match st.decision with
     | Winner _ -> []
@@ -300,7 +295,6 @@ module Game_state = struct
       (match path with
        | [] -> []
        | start :: _ ->
-         (* Path must start on a piece of the side to move *)
          (match Map.find st.board start with
           | Some (Some owner) when Player_kind.equal owner whose_turn ->
             let curr =
@@ -328,7 +322,6 @@ module Game_state = struct
             in
             if List.length path = 1
             then (
-              (* First click: adjacent finals + first hops *)
               let adj =
                 directions
                 |> List.filter_map ~f:(fun dir ->
@@ -341,17 +334,13 @@ module Game_state = struct
               let hops = hops_from curr in
               List.dedup_and_sort ~compare:Cell_position.compare (adj @ hops))
             else if last_seg_is_adjacent
-            then
-              (* Adjacent step chosen → must stop; no extensions *)
-              []
-            else
-              (* In a hop chain → only further hops *)
-              hops_from curr |> List.dedup_and_sort ~compare:Cell_position.compare
+            then []
+            else hops_from curr |> List.dedup_and_sort ~compare:Cell_position.compare
           | _ -> []))
   ;;
 
   let next_step_options (st : t) ~(start : Cell_position.t) ~(path : Cell_position.t list)
-    : step_options
+    : Step_options.t
     =
     let curr =
       match List.last path with
@@ -368,8 +357,6 @@ module Game_state = struct
       | _ -> false
     in
     let first_step_taken = List.length path >= 2 in
-    (* Adjacent options are allowed only if we haven't started hopping yet
-       (and only at the very first step). *)
     let adjacents =
       if first_step_taken
       then []
@@ -381,11 +368,6 @@ module Game_state = struct
           | Some None -> Some dst
           | _ -> None)
     in
-    (* Hop options:
-       - landing must be empty
-       - mid must be occupied
-       - cannot revisit a cell already in the path
-       - if we started with an adjacent step, no hops allowed afterward *)
     let hops =
       if was_adjacent_first
       then []
@@ -403,7 +385,7 @@ module Game_state = struct
             else Some jump
           | _ -> None)
     in
-    { adjacents; hops }
+    { Step_options.adjacents; hops }
   ;;
 
   let is_move_valid (st : t) (mv : Move.t) : unit Or_error.t =
@@ -537,7 +519,6 @@ module Game_state = struct
         in
         loop directions
       in
-      (* DFS for at-least-one legal hop chain, no revisits along path. *)
       let rec any_hop_from ~(curr : Cell_position.t) ~(visited : Cell_position.t list)
         : bool
         =
@@ -598,7 +579,7 @@ module Game_state = struct
       let curr =
         match List.last path with
         | Some x -> x
-        | None -> (* shouldn't happen *) failwith "empty hop path"
+        | None -> failwith "empty hop path"
       in
       let hops =
         directions
@@ -694,8 +675,6 @@ module Game_state = struct
 end
 
 module Ai = struct
-  (* ---------- distance & small helpers ---------- *)
-
   let hex_distance (a : Cell_position.t) (b : Cell_position.t) : int =
     let dq = b.q_coordinate - a.q_coordinate in
     let dr = b.r_coordinate - a.r_coordinate in
@@ -714,7 +693,6 @@ module Ai = struct
     go [] xs
   ;;
 
-  (* “outer ring first” for a goal triangle: larger ring index = farther out *)
   let ring_index (p : Cell_position.t) =
     let q = p.q_coordinate
     and r = p.r_coordinate in
@@ -730,7 +708,6 @@ module Ai = struct
       | _ -> None)
   ;;
 
-  (* Greedy goal assignment cost for player p at state st. *)
   let greedy_goal_cost (st : Game_state.t) (p : Player_kind.t) : int =
     let goals =
       Game_state.goals_for st p
@@ -757,7 +734,6 @@ module Ai = struct
     assign (pieces_of st p) goals 0
   ;;
 
-  (* Heuristic score from `for_player`’s perspective: (opp_best_cost - my_cost) *)
   let heuristic_value ~(for_player : Player_kind.t) (st : Game_state.t) : int =
     match st.decision with
     | Decision.Winner who ->
@@ -780,8 +756,6 @@ module Ai = struct
       opp_best - my_cost
   ;;
 
-  (* ---------- children generation with move cap ---------- *)
-
   let children
         ?(move_cap : int option)
         (node : Game_state.t)
@@ -795,8 +769,7 @@ module Ai = struct
         | Ok st' -> Some (mv, st')
         | Error _ -> None)
     in
-    (* Order children to help pruning: if it’s our turn, visit higher heuristic first;
-       else lower first. *)
+    (* visit order aids pruning *)
     let compare_dir =
       match node.decision with
       | Decision.In_progress { whose_turn } ->
@@ -811,8 +784,6 @@ module Ai = struct
     | None -> sorted
     | Some k -> List.take sorted k
   ;;
-
-  (* ---------- alpha–beta ---------- *)
 
   let rec alpha_beta
             ?(move_cap : int option)
@@ -832,12 +803,10 @@ module Ai = struct
         let ch = children ?move_cap node ~for_player in
         if List.is_empty ch
         then (
-          (* No legal moves: skip turn *)
           let skipped = Game_state.skip_turn node in
           alpha_beta ?move_cap skipped ~for_player (depth - 1) alpha beta)
         else if Player_kind.equal whose_turn for_player
         then (
-          (* maximizing *)
           let best, _ =
             List.fold_until
               ch
@@ -852,7 +821,6 @@ module Ai = struct
           in
           best)
         else (
-          (* minimizing *)
           let best, _ =
             List.fold_until
               ch
@@ -870,9 +838,6 @@ module Ai = struct
           best))
   ;;
 
-  (* ---------- public entry ---------- *)
-
-  (* Evaluate each child ONCE; then pick the best. Also cap moves per node. *)
   let choose_move_with_depth
         ?(move_cap = 30)
         ~(as_player : Player_kind.t)

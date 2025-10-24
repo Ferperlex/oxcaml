@@ -4,17 +4,13 @@ open Chinese_checkers_logic_library
 open Game
 open! Bonsai.Let_syntax
 
-(* ---------- Hex layout (POINTY-topped axial) with UNIFORM scaling ---------- *)
 module Layout = struct
-  (* For pointy-topped hexes:
-     width w = sqrt(3) * size, height h = 2 * size *)
   let size = 1.0
   let w = Float.sqrt 3.0 *. size
   let h = 2.0 *. size
   let half_w = w /. 2.0
   let half_h = h /. 2.0
 
-  (* Pointy-topped axial -> pixel *)
   let xy_of_axial (q, r) =
     let qf = Float.of_int q
     and rf = Float.of_int r in
@@ -23,14 +19,15 @@ module Layout = struct
     x, y
   ;;
 
-  type bounds =
-    { cx : float
-    ; cy : float
-    ; span : float
-    }
+  module Bounds = struct
+    type t =
+      { cx : float
+      ; cy : float
+      ; span : float
+      }
+  end
 
-  (* Compute a single uniform span that covers X and Y, centered *)
-  let uniform_bounds (cells : (Cell_position.t * 'a) list) : bounds =
+  let uniform_bounds (cells : (Cell_position.t * 'a) list) : Bounds.t =
     let xs, ys =
       List.map cells ~f:(fun (pos, _) -> xy_of_axial (pos.q_coordinate, pos.r_coordinate))
       |> List.unzip
@@ -39,7 +36,6 @@ module Layout = struct
     let max_x = List.max_elt xs ~compare:Float.compare |> Option.value ~default:1. in
     let min_y = List.min_elt ys ~compare:Float.compare |> Option.value ~default:0. in
     let max_y = List.max_elt ys ~compare:Float.compare |> Option.value ~default:1. in
-    (* expand by half a hex so edges are fully visible *)
     let min_x = min_x -. half_w
     and max_x = max_x +. half_w in
     let min_y = min_y -. half_h
@@ -50,24 +46,20 @@ module Layout = struct
     { cx; cy; span }
   ;;
 
-  (* fit = inner padding fraction (0..1) to keep some breathing room *)
-  let normalize ~bounds ~(fit : float) (x, y) =
-    let nx = ((x -. bounds.cx) /. bounds.span *. fit) +. 0.5 in
-    let ny = ((y -. bounds.cy) /. bounds.span *. fit) +. 0.5 in
+  let normalize ~bounds:(b : Bounds.t) ~(fit : float) (x, y) =
+    let nx = ((x -. b.cx) /. b.span *. fit) +. 0.5 in
+    let ny = ((y -. b.cy) /. b.span *. fit) +. 0.5 in
     nx *. 100.0, ny *. 100.0
   ;;
 
-  (* cell_scale shrinks each hex’s visual bbox to keep dots smaller than cells *)
-  let cell_size_pct ~bounds ~(fit : float) ~(cell_scale : float) =
-    let cw = w /. bounds.span *. fit *. cell_scale *. 100.0 in
-    let ch = h /. bounds.span *. fit *. cell_scale *. 100.0 in
+  let cell_size_pct ~bounds:(b : Bounds.t) ~(fit : float) ~(cell_scale : float) =
+    let cw = w /. b.span *. fit *. cell_scale *. 100.0 in
+    let ch = h /. b.span *. fit *. cell_scale *. 100.0 in
     cw, ch
   ;;
 end
 
-(* ---------- Small helpers ---------- *)
 let pos_equal a b = Int.equal (Cell_position.compare a b) 0
-(* let last_exn xs = Option.value_exn (List.last xs) *)
 
 let class_of_player = function
   | Player_kind.A -> "A"
@@ -87,29 +79,34 @@ let color_name_of_player = function
   | F -> "Red"
 ;;
 
-(* ---------- Bonsai UI ---------- *)
 module Ui = struct
-  type screen =
-    | Landing
-    | Playing of Game_state.t
-  [@@deriving equal, sexp]
+  module Screen = struct
+    type t =
+      | Landing
+      | Playing of Game_state.t
+    [@@deriving equal, sexp]
+  end
 
-  type model =
-    { screen : screen
-    ; path : Cell_position.t list (* in-progress path; [] => no selection *)
-    }
-  [@@deriving equal, sexp]
+  module Model = struct
+    type t =
+      { screen : Screen.t
+      ; path : Cell_position.t list
+      }
+    [@@deriving equal, sexp]
+  end
 
-  let initial_model = { screen = Landing; path = [] }
+  let initial_model : Model.t = { screen = Landing; path = [] }
 
-  type action =
-    | Start_game of int
-    | Select_start of Cell_position.t
-    | Extend_path of Cell_position.t
-    | Confirm_path
-    | Cancel_path
+  module Action = struct
+    type t =
+      | Start_game of int
+      | Select_start of Cell_position.t
+      | Extend_path of Cell_position.t
+      | Confirm_path
+      | Cancel_path
+  end
 
-  let apply_action (m : model) (a : action) : model =
+  let apply_action (m : Model.t) (a : Action.t) : Model.t =
     match a, m.screen with
     | Start_game n, _ ->
       (match Game_state.create ~number_of_players:n with
@@ -148,8 +145,7 @@ module Ui = struct
     | Confirm_path, Landing -> m
   ;;
 
-  (* ---------- Landing screen ---------- *)
-  let landing ~(inject : action -> unit Ui_effect.t) : Vdom.Node.t =
+  let landing ~(inject : Action.t -> unit Ui_effect.t) : Vdom.Node.t =
     let cell lbl n extra_classes =
       Vdom.Node.div
         ~attrs:
@@ -176,25 +172,19 @@ module Ui = struct
       ]
   ;;
 
-  (* ---------- Playing view ---------- *)
   let playing_view
         (st : Game_state.t)
         (path : Cell_position.t list)
-        ~(inject : action -> unit Ui_effect.t)
+        ~(inject : Action.t -> unit Ui_effect.t)
     : Vdom.Node.t
     =
-    (* Precompute layout with UNIFORM scaling *)
     let cells = Map.to_alist st.board in
     let bounds = Layout.uniform_bounds cells in
     let fit = 0.92 in
-    (* padding so dots don't touch the frame *)
     let cell_scale = 0.74 in
-    (* smaller circles *)
     let cell_w, cell_h = Layout.cell_size_pct ~bounds ~fit ~cell_scale in
-    (* Next steps from staged path (respects hop-vs-adjacent rule) *)
     let next_steps = Game_state.next_steps_from_path st ~path in
     let is_next pos = List.mem next_steps pos ~equal:pos_equal in
-    (* Moving overlay at the head of the staged path (speculative move) *)
     let moving_owner, moving_head =
       match path with
       | start :: _ ->
@@ -203,7 +193,6 @@ module Ui = struct
          | _ -> None, None)
       | [] -> None, None
     in
-    (* Confirm becomes active only if path is a legal move *)
     let can_confirm =
       if List.length path >= 2
       then (
@@ -212,24 +201,20 @@ module Ui = struct
         | Error _ -> false)
       else false
     in
-    (* Turn tint on container class *)
     let turn_class =
       match st.decision with
       | Decision.In_progress { whose_turn } -> class_of_player whose_turn
       | Decision.Winner _ -> "none"
     in
-    (* Render a single hex cell *)
     let render_cell ((pos : Cell_position.t), occ) =
       let x, y = Layout.xy_of_axial (pos.q_coordinate, pos.r_coordinate) in
       let left_pct, top_pct = Layout.normalize ~bounds ~fit (x, y) in
       let alt = (pos.q_coordinate + pos.r_coordinate) land 1 = 0 in
-      (* Hide base piece if it's the start of a staged path *)
       let is_path_start =
         match path with
         | s :: _ -> pos_equal s pos
         | _ -> false
       in
-      (* Base (non-moving) piece *)
       let base_piece =
         match occ with
         | None -> Vdom.Node.none
@@ -250,7 +235,6 @@ module Ui = struct
                  :: selectable)
               []
       in
-      (* Moving overlay piece at the head of the path (speculative move) *)
       let moving_piece =
         match moving_owner, moving_head with
         | Some who, Some head when pos_equal pos head ->
@@ -262,7 +246,6 @@ module Ui = struct
             []
         | _ -> Vdom.Node.none
       in
-      (* Click: extend path to next-step destination *)
       let dest_click_attr =
         if is_next pos
         then Vdom.Attr.on_click (fun _ -> inject (Extend_path pos))
@@ -284,7 +267,6 @@ module Ui = struct
         ~attrs:[ Vdom.Attr.classes cell_classes; Vdom.Attr.style style; dest_click_attr ]
         [ base_piece; moving_piece ]
     in
-    (* HUD with Confirm/Cancel while building a move *)
     let hud =
       match path with
       | [] -> Vdom.Node.none
@@ -310,7 +292,6 @@ module Ui = struct
               ]
           ]
     in
-    (* Winner banner *)
     let win_banner =
       match st.decision with
       | Decision.Winner who ->
@@ -330,23 +311,17 @@ module Ui = struct
       ]
   ;;
 
-  let view (model : model) ~(inject : action -> unit Ui_effect.t) : Vdom.Node.t =
+  let view (model : Model.t) ~(inject : Action.t -> unit Ui_effect.t) : Vdom.Node.t =
     match model.screen with
     | Landing -> landing ~inject
     | Playing st -> playing_view st model.path ~inject
   ;;
 
   let component () =
-    let%sub model, set_model =
-      Bonsai.state
-        (module struct
-          type t = model [@@deriving equal, sexp]
-        end)
-        ~default_model:initial_model
-    in
+    let%sub model, set_model = Bonsai.state (module Model) ~default_model:initial_model in
     let%arr model = model
     and set_model = set_model in
-    let inject a =
+    let inject (a : Action.t) =
       let next = apply_action model a in
       set_model next
     in
@@ -354,6 +329,5 @@ module Ui = struct
   ;;
 end
 
-(* Entry point *)
 let app = Ui.component ()
 let () = Bonsai_web.Start.start app
