@@ -4,20 +4,22 @@ open Chinese_checkers_logic_library
 open Game
 open! Bonsai.Let_syntax
 
-(* ---------- Hex layout (flat-topped axial) with UNIFORM scaling ---------- *)
+(* ---------- Hex layout (POINTY-topped axial) with UNIFORM scaling ---------- *)
 module Layout = struct
+  (* For pointy-topped hexes:
+     width w = sqrt(3) * size, height h = 2 * size *)
   let size = 1.0
-  let w = 2.0 *. size
-  let h = Float.sqrt 3.0 *. size
+  let w = Float.sqrt 3.0 *. size
+  let h = 2.0 *. size
   let half_w = w /. 2.0
   let half_h = h /. 2.0
 
+  (* Pointy-topped axial -> pixel *)
   let xy_of_axial (q, r) =
     let qf = Float.of_int q
     and rf = Float.of_int r in
-    (* flat-topped axial to pixel *)
-    let x = 1.5 *. size *. qf in
-    let y = Float.sqrt 3.0 *. size *. (rf +. (qf /. 2.0)) in
+    let x = Float.sqrt 3.0 *. (qf +. (rf /. 2.0)) *. size in
+    let y = 1.5 *. rf *. size in
     x, y
   ;;
 
@@ -48,7 +50,7 @@ module Layout = struct
     { cx; cy; span }
   ;;
 
-  (* fit = inner padding fraction (0..1). Use a bit more padding for breathing room. *)
+  (* fit = inner padding fraction (0..1) to keep some breathing room *)
   let normalize ~bounds ~(fit : float) (x, y) =
     let nx = ((x -. bounds.cx) /. bounds.span *. fit) +. 0.5 in
     let ny = ((y -. bounds.cy) /. bounds.span *. fit) +. 0.5 in
@@ -65,6 +67,7 @@ end
 
 (* ---------- Small helpers ---------- *)
 let pos_equal a b = Int.equal (Cell_position.compare a b) 0
+(* let last_exn xs = Option.value_exn (List.last xs) *)
 
 let class_of_player = function
   | Player_kind.A -> "A"
@@ -82,14 +85,6 @@ let color_name_of_player = function
   | D -> "Amber"
   | E -> "Purple"
   | F -> "Red"
-;;
-
-(* Given a selected start cell, collect all legal moves that start there *)
-let _moves_from (st : Game_state.t) (start : Cell_position.t) : Move.t list =
-  Game_state.all_legal_moves st
-  |> List.filter ~f:(function
-    | s :: _ -> pos_equal s start
-    | _ -> false)
 ;;
 
 (* ---------- Bonsai UI ---------- *)
@@ -114,14 +109,12 @@ module Ui = struct
     | Select_start pos ->
       (match m.game_state.decision with
        | Decision.In_progress { whose_turn } ->
-         (* only allow starting from your own piece, and only if not already staging a path *)
          (match Map.find m.game_state.board pos with
           | Some (Some who) when Player_kind.equal who whose_turn && List.is_empty m.path
             -> { m with path = [ pos ] }
           | _ -> m)
        | _ -> m)
     | Extend_path dst ->
-      (* Only allow extending if [dst] is a valid next step from [path] *)
       if List.is_empty m.path
       then m
       else (
@@ -143,13 +136,13 @@ module Ui = struct
 
   let view (model : model) ~(inject : action -> unit Ui_effect.t) : Vdom.Node.t =
     let st = model.game_state in
-    (* Precompute layout with UNIFORM scaling + a bit more inner padding *)
+    (* Precompute layout with UNIFORM scaling *)
     let cells = Map.to_alist st.board in
     let bounds = Layout.uniform_bounds cells in
-    let fit = 0.88 in
-    (* more padding from the rectangle edges *)
-    let cell_scale = 0.82 in
-    (* smaller visual circles within each cell *)
+    let fit = 0.92 in
+    (* extra padding so dots don't touch the frame *)
+    let cell_scale = 0.74 in
+    (* smaller circles *)
     let cell_w, cell_h = Layout.cell_size_pct ~bounds ~fit ~cell_scale in
     (* Next steps from staged path (respects hop-vs-adjacent rule) *)
     let next_steps = Game_state.next_steps_from_path st ~path:model.path in
