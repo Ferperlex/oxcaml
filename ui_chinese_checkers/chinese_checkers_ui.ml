@@ -36,6 +36,7 @@ module Layout = struct
     let max_x = List.max_elt xs ~compare:Float.compare |> Option.value ~default:1. in
     let min_y = List.min_elt ys ~compare:Float.compare |> Option.value ~default:0. in
     let max_y = List.max_elt ys ~compare:Float.compare |> Option.value ~default:1. in
+    (* expand half-hex so outer rims are fully visible *)
     { min_x = min_x -. half_w
     ; max_x = max_x +. half_w
     ; min_y = min_y -. half_h
@@ -120,14 +121,14 @@ module Ui = struct
 
   let view (model : model) ~(inject : action -> unit Ui_effect.t) : Vdom.Node.t =
     let st = model.game_state in
-    (* Base geometry *)
+    (* Precompute layout *)
     let cells = Map.to_alist st.board in
     let bbox = Layout.bbox_of_cells cells in
     let cell_w, cell_h = Layout.cell_size_pct ~bbox in
-    (* next steps: computed from in-progress path via Game_state *)
+    (* Compute next steps based on staged path *)
     let next_steps = Game_state.next_steps_from_path st ~path:model.path in
     let is_next pos = List.mem next_steps pos ~equal:pos_equal in
-    (* moving overlay info (draw piece at head of the path) *)
+    (* Show moving overlay at head of staged path *)
     let moving_owner, moving_head =
       match model.path with
       | start :: _ ->
@@ -136,7 +137,7 @@ module Ui = struct
          | _ -> None, None)
       | [] -> None, None
     in
-    (* Confirm is enabled only if the staged path is a legal move *)
+    (* Confirm becomes active only if path is a legal move *)
     let can_confirm =
       if List.length model.path >= 2
       then (
@@ -150,13 +151,13 @@ module Ui = struct
       let x, y = Layout.xy_of_axial (pos.q_coordinate, pos.r_coordinate) in
       let left_pct, top_pct = Layout.normalize ~bbox (x, y) in
       let alt = (pos.q_coordinate + pos.r_coordinate) land 1 = 0 in
-      (* Is this the start of active path? If so, hide the base piece *)
+      (* Hide base piece if it’s the start of a staged path *)
       let is_path_start =
         match model.path with
         | s :: _ -> pos_equal s pos
         | _ -> false
       in
-      (* base (board) piece; selectable on your turn if no path in progress *)
+      (* Base (board) piece; selectable if it's your turn and no path in progress *)
       let base_piece =
         match occ with
         | None -> Vdom.Node.none
@@ -177,7 +178,7 @@ module Ui = struct
                  :: selectable)
               []
       in
-      (* moving overlay piece at head of the path *)
+      (* Moving overlay piece at the head of the path (speculative move) *)
       let moving_piece =
         match moving_owner, moving_head with
         | Some who, Some head when pos_equal pos head ->
@@ -189,7 +190,7 @@ module Ui = struct
             []
         | _ -> Vdom.Node.none
       in
-      (* clicking a next step extends the path *)
+      (* Click: extend path to a next-step destination *)
       let dest_click_attr =
         if is_next pos
         then Vdom.Attr.on_click (fun _ -> inject (Extend_path pos))
@@ -239,8 +240,8 @@ module Ui = struct
     in
     Vdom.Node.div
       ~attrs:[ Vdom.Attr.class_ "game" ]
-      [ hud
-      ; Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "board" ] (List.map cells ~f:render_cell)
+      [ Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "board" ] (List.map cells ~f:render_cell)
+      ; hud
       ]
   ;;
 
@@ -262,7 +263,7 @@ module Ui = struct
   ;;
 end
 
-(* Entry point used by Bonsai_web.Start.start *)
+(* Entry point *)
 let app =
   let initial_state = Game_state.create ~number_of_players:2 |> Or_error.ok_exn in
   Ui.component ~initial_state
