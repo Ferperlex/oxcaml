@@ -1,6 +1,12 @@
 (executables
  (modes js)
  (names chinese_checkers_ui)
- (libraries bonsai.web core virtual_dom chinese_checkers_logic_library)
+ (libraries
+  bonsai.web
+  core
+  virtual_dom
+  chinese_checkers_logic_library
+  js_of_ocaml
+  async_kernel)
  (preprocess
-  (pps ppx_jane bonsai.ppx_bonsai)))
+  (pps ppx_jane bonsai.ppx_bonsai js_of_ocaml-ppx)))

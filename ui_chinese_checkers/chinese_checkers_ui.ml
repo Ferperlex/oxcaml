@@ -1,8 +1,22 @@
 open! Core
 open Virtual_dom
+open Async_kernel
+open Bonsai.Let_syntax
+open Js_of_ocaml
 open Chinese_checkers_logic_library
 open Game
-open! Bonsai.Let_syntax
+
+module Id = struct
+  let generate () =
+    let t = (new%js Js.date_now)##getTime |> Js.to_float |> int_of_float in
+    let r = Random.int 0x3ffffff in
+    Printf.sprintf "%x-%x" t r
+  ;;
+end
+
+module Player_label = struct
+  let make idx = Printf.sprintf "Player %d" (idx + 1)
+end
 
 module Layout = struct
   let size = 1.0
@@ -32,10 +46,10 @@ module Layout = struct
       List.map cells ~f:(fun (pos, _) -> xy_of_axial (pos.q_coordinate, pos.r_coordinate))
       |> List.unzip
     in
-    let min_x = List.min_elt xs ~compare:Float.compare |> Option.value ~default:0. in
-    let max_x = List.max_elt xs ~compare:Float.compare |> Option.value ~default:1. in
-    let min_y = List.min_elt ys ~compare:Float.compare |> Option.value ~default:0. in
-    let max_y = List.max_elt ys ~compare:Float.compare |> Option.value ~default:1. in
+    let min_x = Option.value ~default:0. (List.min_elt xs ~compare:Float.compare) in
+    let max_x = Option.value ~default:1. (List.max_elt xs ~compare:Float.compare) in
+    let min_y = Option.value ~default:0. (List.min_elt ys ~compare:Float.compare) in
+    let max_y = Option.value ~default:1. (List.max_elt ys ~compare:Float.compare) in
     let min_x = min_x -. half_w
     and max_x = max_x +. half_w in
     let min_y = min_y -. half_h
@@ -59,43 +73,402 @@ module Layout = struct
   ;;
 end
 
-let pos_equal a b = Int.equal (Cell_position.compare a b) 0
+module Firebase = struct
+  module Config = struct
+    let project = "ocaml-cttt"
+    let key = "AIzaSyBsyzwDn-o2a47CAelN0kixWpFEryHuKGE"
 
-let class_of_player = function
-  | Player_kind.A -> "A"
-  | B -> "B"
-  | C -> "C"
-  | D -> "D"
-  | E -> "E"
-  | F -> "F"
-;;
+    let base =
+      Printf.sprintf
+        "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents"
+        project
+    ;;
 
-let color_name_of_player = function
-  | Player_kind.A -> "Blue"
-  | B -> "Orange"
-  | C -> "Green"
-  | D -> "Black"
-  | E -> "Purple"
-  | F -> "Red"
-;;
+    let run_query =
+      Printf.sprintf
+        "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents:runQuery?key=%s"
+        project
+        key
+    ;;
+
+    let lobby_doc id = Printf.sprintf "%s/lobby/%s?key=%s" base id key
+    let lobby_doc_create id = Printf.sprintf "%s/lobby?documentId=%s&key=%s" base id key
+    let game_doc id = Printf.sprintf "%s/game-state/%s?key=%s" base id key
+
+    let game_doc_create id =
+      Printf.sprintf "%s/game-state?documentId=%s&key=%s" base id key
+    ;;
+  end
+
+  module Http = struct
+    type method_ =
+      [ `GET
+      | `POST
+      | `PATCH
+      ]
+
+    let to_js = function
+      | `GET -> Js.string "GET"
+      | `POST -> Js.string "POST"
+      | `PATCH -> Js.string "PATCH"
+    ;;
+
+    let request ~(meth : method_) ~(url : string) ?(body : string option) () =
+      let open Async_kernel in
+      Deferred.create (fun ivar ->
+        let xhr = XmlHttpRequest.create () in
+        xhr##_open (to_js meth) (Js.string url) Js._true;
+        (match body with
+         | Some _ ->
+           xhr##setRequestHeader (Js.string "Content-Type") (Js.string "application/json")
+         | None -> ());
+        xhr##.onreadystatechange
+        := Js.wrap_callback (fun _ ->
+             match xhr##.readyState with
+             | XmlHttpRequest.DONE ->
+               let status = xhr##.status in
+               let resp =
+                 Js.Opt.get xhr##.responseText (fun () -> Js.string "") |> Js.to_string
+               in
+               Ivar.fill ivar (status, resp)
+             | _ -> ());
+        ignore
+          (xhr##send
+             (match body with
+              | None -> Js.null
+              | Some b -> Js.Opt.return (Js.string b))))
+    ;;
+  end
+
+  module Json = struct
+    let get o k = Js.Unsafe.get o k
+    let opt o = Js.Optdef.test (Js.Optdef.return o)
+    let to_string_exn v = Js.to_string v
+    let int_of_jsint v = v |> Js.to_string |> Int.of_string
+  end
+
+  module Lobby = struct
+    type t =
+      { game_id : string
+      ; capacity : int
+      ; players : string list
+      ; status : string
+      }
+    [@@deriving sexp, equal]
+
+    let encode_create ~(game_id : string) ~(capacity : int) ~(first_player : string) =
+      Printf.sprintf
+        {|{"fields":{
+            "game_id":{"stringValue":"%s"},
+            "capacity":{"integerValue":"%d"},
+            "players":{"arrayValue":{"values":[{"stringValue":"%s"}]}},
+            "status":{"stringValue":"waiting"},
+            "created_at":{"timestampValue":"%s"}
+          }}|}
+        game_id
+        capacity
+        first_player
+        ((new%js Js.date_now)##toISOString |> Js.to_string)
+    ;;
+
+    let encode_players players =
+      let vals =
+        players
+        |> List.map ~f:(fun p -> Printf.sprintf {|{"stringValue":"%s"}|} p)
+        |> String.concat ~sep:","
+      in
+      Printf.sprintf {|{"fields":{"players":{"arrayValue":{"values":[%s]}}}}|} vals
+    ;;
+
+    let decode ~game_id json =
+      let open Json in
+      let fields = get json "fields" in
+      let capacity =
+        match opt fields with
+        | false -> 0
+        | true ->
+          let v = get (get fields "capacity") "integerValue" in
+          int_of_jsint v
+      in
+      let status =
+        match opt fields with
+        | false -> "waiting"
+        | true ->
+          let v = get (get fields "status") "stringValue" in
+          to_string_exn v
+      in
+      let players =
+        match opt fields with
+        | false -> []
+        | true ->
+          let arr = get (get (get fields "players") "arrayValue") "values" in
+          let n = arr##.length in
+          let rec loop i acc =
+            match Int.(i >= n) with
+            | true -> List.rev acc
+            | false ->
+              let v = Js.Optdef.get (Js.array_get arr i) (Js.Unsafe.obj [||]) in
+              let s = get v "stringValue" |> to_string_exn in
+              loop (i + 1) (s :: acc)
+          in
+          loop 0 []
+      in
+      { game_id; capacity; players; status }
+    ;;
+
+    let run_query_first_waiting ~(capacity : int) =
+      let where =
+        Printf.sprintf
+          {|{
+              "structuredQuery":{
+                "from":[{"collectionId":"lobby"}],
+                "where":{"compositeFilter":{"op":"AND","filters":[
+                  {"fieldFilter":{"field":{"fieldPath":"capacity"},"op":"EQUAL","value":{"integerValue":"%d"}}},
+                  {"fieldFilter":{"field":{"fieldPath":"status"},"op":"EQUAL","value":{"stringValue":"waiting"}}}
+                ]}},
+                "limit":1
+              }
+            }|}
+          capacity
+      in
+      let%bind.Deferred status, resp =
+        Http.request ~meth:`POST ~url:Config.run_query ~body:where ()
+      in
+      match status with
+      | s when s >= 200 && s < 300 ->
+        let arr = Js.Unsafe.global##._JSON##parse (Js.string resp) in
+        let first = Js.array_get arr 0 in
+        let has_doc = Json.opt (Json.get first "document") in
+        (match has_doc with
+         | false -> Async_kernel.return None
+         | true ->
+           let doc = Json.get first "document" in
+           let name = Json.get doc "name" |> Js.to_string in
+           let game_id =
+             match String.rsplit2 ~on:'/' name with
+             | None -> name
+             | Some (_p, id) -> id
+           in
+           let lobby = decode ~game_id doc in
+           Async_kernel.return (Some lobby))
+      | _ -> Async_kernel.return None
+    ;;
+
+    let get ~(game_id : string) =
+      let%bind.Deferred status, resp =
+        Http.request ~meth:`GET ~url:(Config.lobby_doc game_id) ()
+      in
+      match status with
+      | s when s >= 200 && s < 300 ->
+        let json = Js.Unsafe.global##._JSON##parse (Js.string resp) in
+        Async_kernel.return (Ok (decode ~game_id json))
+      | 404 -> Async_kernel.return (Error `Not_found)
+      | _ -> Async_kernel.return (Error `Http)
+    ;;
+
+    let create ~(game_id : string) ~(capacity : int) ~(first_player : string) =
+      let body = encode_create ~game_id ~capacity ~first_player in
+      let%bind.Deferred status, _resp =
+        Http.request ~meth:`POST ~url:(Config.lobby_doc_create game_id) ~body ()
+      in
+      match status with
+      | s when s >= 200 && s < 300 -> get ~game_id
+      | _ -> Async_kernel.return (Error `Http)
+    ;;
+
+    let patch_players ~(game_id : string) ~(players : string list) =
+      let body = encode_players players in
+      let url = Config.lobby_doc game_id ^ "&updateMask.fieldPaths=players" in
+      let%bind.Deferred status, _resp = Http.request ~meth:`PATCH ~url ~body () in
+      match status with
+      | s when s >= 200 && s < 300 -> get ~game_id
+      | _ -> Async_kernel.return (Error `Http)
+    ;;
+
+    let set_started ~(game_id : string) =
+      let body = {|{"fields":{"status":{"stringValue":"started"}}}|} in
+      let url = Config.lobby_doc game_id ^ "&updateMask.fieldPaths=status" in
+      let%bind.Deferred status, _resp = Http.request ~meth:`PATCH ~url ~body () in
+      match status with
+      | s when s >= 200 && s < 300 -> Async_kernel.return (Ok ())
+      | _ -> Async_kernel.return (Error ())
+    ;;
+  end
+
+  module Game_doc = struct
+    type t =
+      { game_id : string
+      ; state : Game_state.t option
+      }
+
+    let encode_state (st : Game_state.t) =
+      let s = Game_state.sexp_of_t st |> Sexp.to_string |> String.escaped in
+      Printf.sprintf {|{"fields":{"state":{"stringValue":"%s"}}}|} s
+    ;;
+
+    let encode_create ~(game_id : string) ~(initial : Game_state.t) =
+      let s = Game_state.sexp_of_t initial |> Sexp.to_string |> String.escaped in
+      Printf.sprintf
+        {|{"fields":{
+            "game_id":{"stringValue":"%s"},
+            "state":{"stringValue":"%s"},
+            "created_at":{"timestampValue":"%s"}
+          }}|}
+        game_id
+        s
+        ((new%js Js.date_now)##toISOString |> Js.to_string)
+    ;;
+
+    let decode ~(game_id : string) json =
+      let fields = Js.Unsafe.get json "fields" in
+      let has_state = Json.opt (Js.Unsafe.get fields "state") in
+      match has_state with
+      | false -> { game_id; state = None }
+      | true ->
+        let s =
+          Js.Unsafe.get (Js.Unsafe.get fields "state") "stringValue" |> Js.to_string
+        in
+        let sexp = Sexp.of_string s in
+        let st = Game_state.t_of_sexp sexp in
+        { game_id; state = Some st }
+    ;;
+
+    let create ~(game_id : string) ~(initial : Game_state.t) =
+      let body = encode_create ~game_id ~initial in
+      let%bind.Deferred status, _resp =
+        Http.request ~meth:`POST ~url:(Config.game_doc_create game_id) ~body ()
+      in
+      match status with
+      | s when s >= 200 && s < 300 -> Async_kernel.return (Ok ())
+      | 409 -> Async_kernel.return (Ok ())
+      | _ -> Async_kernel.return (Error ())
+    ;;
+
+    let get ~(game_id : string) =
+      let%bind.Deferred status, resp =
+        Http.request ~meth:`GET ~url:(Config.game_doc game_id) ()
+      in
+      match status with
+      | s when s >= 200 && s < 300 ->
+        let json = Js.Unsafe.global##._JSON##parse (Js.string resp) in
+        Async_kernel.return (Ok (decode ~game_id json))
+      | 404 -> Async_kernel.return (Ok { game_id; state = None })
+      | _ -> Async_kernel.return (Error ())
+    ;;
+
+    let save ~(game_id : string) ~(state : Game_state.t) =
+      let body = encode_state state in
+      let%bind.Deferred status, _resp =
+        Http.request ~meth:`PATCH ~url:(Config.game_doc game_id) ~body ()
+      in
+      match status with
+      | s when s >= 200 && s < 300 -> Async_kernel.return (Ok ())
+      | _ -> Async_kernel.return (Error ())
+    ;;
+  end
+end
+
+module Quickplay = struct
+  let color_of_index i =
+    match i with
+    | 0 -> Player_kind.A
+    | 1 -> Player_kind.B
+    | 2 -> Player_kind.C
+    | 3 -> Player_kind.D
+    | 4 -> Player_kind.E
+    | _ -> Player_kind.F
+  ;;
+
+  let initial_state ~capacity =
+    match Game_state.create ~number_of_players:capacity with
+    | Ok st -> st
+    | Error _ -> failwith "init"
+  ;;
+
+  let join_or_create ~(capacity : int) =
+    let open Async_kernel in
+    let%bind found = Firebase.Lobby.run_query_first_waiting ~capacity in
+    match found with
+    | None ->
+      let game_id = Id.generate () in
+      let first = Player_label.make 0 in
+      let%bind created = Firebase.Lobby.create ~game_id ~capacity ~first_player:first in
+      (match created with
+       | Error _ -> return (Error `Http)
+       | Ok l ->
+         return
+           (Ok
+              ( Firebase.Lobby.
+                  { game_id = l.game_id
+                  ; capacity = l.capacity
+                  ; players = l.players
+                  ; status = l.status
+                  }
+              , 0 )))
+    | Some l ->
+      let me_idx = List.length l.players in
+      let label = Player_label.make me_idx in
+      let players = l.players @ [ label ] in
+      let%bind patched = Firebase.Lobby.patch_players ~game_id:l.game_id ~players in
+      (match patched with
+       | Error _ -> return (Error `Http)
+       | Ok l' -> return (Ok (l', me_idx)))
+  ;;
+
+  let start_if_full (l : Firebase.Lobby.t) =
+    let open Async_kernel in
+    match
+      Int.equal (List.length l.players) l.capacity, String.equal l.status "waiting"
+    with
+    | true, true ->
+      let st0 = initial_state ~capacity:l.capacity in
+      let%bind _ = Firebase.Game_doc.create ~game_id:l.game_id ~initial:st0 in
+      let%bind _ = Firebase.Lobby.set_started ~game_id:l.game_id in
+      return ()
+    | _ -> return ()
+  ;;
+end
 
 module Ui = struct
   module Screen = struct
     type t =
       | Landing
-      | Playing of Game_state.t
-    [@@deriving equal, sexp]
+      | Waiting of
+          { lobby : Firebase.Lobby.t
+          ; me_index : int
+          }
+      | Playing_online of
+          { game_id : string
+          ; me_color : Player_kind.t
+          ; state : Game_state.t
+          }
+      | Playing_offline of Game_state.t
+    [@@deriving sexp, equal]
+  end
+
+  module Online = struct
+    type t =
+      { game_id : string
+      ; me_index : int
+      ; capacity : int
+      ; me_color : Player_kind.t
+      }
+    [@@deriving sexp, equal]
   end
 
   module Model = struct
     type t =
       { screen : Screen.t
       ; path : Cell_position.t list
+      ; online : Online.t option
+      ; pending_save : Game_state.t option
       }
-    [@@deriving equal, sexp]
+    [@@deriving sexp, equal]
   end
 
-  let initial_model : Model.t = { screen = Landing; path = [] }
+  let initial_model =
+    { Model.screen = Landing; path = []; online = None; pending_save = None }
+  ;;
 
   module Action = struct
     type t =
@@ -104,17 +477,38 @@ module Ui = struct
       | Extend_path of Cell_position.t
       | Confirm_path
       | Cancel_path
+      | Lobby_refreshed of Firebase.Lobby.t
+      | Game_refreshed of Game_state.t option
+      | Clear_pending_save
   end
 
+  let pos_equal a b = Int.equal (Cell_position.compare a b) 0
+
+  let class_of_player = function
+    | Player_kind.A -> "A"
+    | B -> "B"
+    | C -> "C"
+    | D -> "D"
+    | E -> "E"
+    | F -> "F"
+  ;;
+
+  let color_name_of_player = function
+    | Player_kind.A -> "Blue"
+    | B -> "Orange"
+    | C -> "Green"
+    | D -> "Black"
+    | E -> "Purple"
+    | F -> "Red"
+  ;;
+
   let apply_action (m : Model.t) (a : Action.t) : Model.t =
-    match a, m.screen with
-    | Start_game n, _ ->
-      (match Game_state.create ~number_of_players:n with
-       | Ok st -> { screen = Playing st; path = [] }
-       | Error _ -> m)
-    | Cancel_path, Playing _ -> { m with path = [] }
-    | Cancel_path, Landing -> m
-    | Select_start pos, Playing st ->
+    match a, m.screen, m.online with
+    | Start_game _, _, _ -> m
+    | Cancel_path, Playing_offline _, _ -> { m with path = [] }
+    | Cancel_path, Playing_online _, _ -> { m with path = [] }
+    | Cancel_path, _, _ -> m
+    | Select_start pos, Playing_offline st, _ ->
       (match st.decision with
        | Decision.In_progress { whose_turn } ->
          (match Map.find st.board pos with
@@ -122,35 +516,86 @@ module Ui = struct
             -> { m with path = [ pos ] }
           | _ -> m)
        | _ -> m)
-    | Select_start _, Landing -> m
-    | Extend_path dst, Playing st ->
-      if List.is_empty m.path
-      then m
-      else (
-        let nexts = Game_state.next_steps_from_path st ~path:m.path in
-        if List.mem nexts dst ~equal:pos_equal
-        then { m with path = m.path @ [ dst ] }
-        else m)
-    | Extend_path _, Landing -> m
-    | Confirm_path, Playing st ->
-      if List.length m.path < 2
-      then m
-      else (
-        match Game_state.is_move_valid st m.path with
-        | Ok () ->
-          (match Game_state.make_move st m.path with
-           | Ok st' -> { screen = Playing st'; path = [] }
-           | Error _ -> { m with path = [] })
-        | Error _ -> { m with path = [] })
-    | Confirm_path, Landing -> m
+    | Select_start pos, Playing_online { state; _ }, Some online ->
+      (match state.decision with
+       | Decision.In_progress { whose_turn } ->
+         (match Map.find state.board pos with
+          | Some (Some who)
+            when Player_kind.equal who whose_turn
+                 && Player_kind.equal who online.me_color
+                 && List.is_empty m.path -> { m with path = [ pos ] }
+          | _ -> m)
+       | _ -> m)
+    | Select_start _, _, _ -> m
+    | Extend_path dst, Playing_offline st, _ ->
+      (match List.is_empty m.path with
+       | true -> m
+       | false ->
+         let nexts = Game_state.next_steps_from_path st ~path:m.path in
+         (match List.mem nexts dst ~equal:pos_equal with
+          | true -> { m with path = m.path @ [ dst ] }
+          | false -> m))
+    | Extend_path dst, Playing_online { state; _ }, _ ->
+      (match List.is_empty m.path with
+       | true -> m
+       | false ->
+         let nexts = Game_state.next_steps_from_path state ~path:m.path in
+         (match List.mem nexts dst ~equal:pos_equal with
+          | true -> { m with path = m.path @ [ dst ] }
+          | false -> m))
+    | Extend_path _, _, _ -> m
+    | Confirm_path, Playing_offline st, _ ->
+      (match List.length m.path >= 2 with
+       | false -> m
+       | true ->
+         (match Game_state.is_move_valid st m.path with
+          | Error _ -> { m with path = [] }
+          | Ok () ->
+            (match Game_state.make_move st m.path with
+             | Ok st' -> { m with screen = Playing_offline st'; path = [] }
+             | Error _ -> { m with path = [] })))
+    | Confirm_path, Playing_online { state; game_id; _ }, Some online ->
+      (match List.length m.path >= 2 with
+       | false -> m
+       | true ->
+         (match Game_state.is_move_valid state m.path with
+          | Error _ -> { m with path = [] }
+          | Ok () ->
+            (match Game_state.make_move state m.path with
+             | Ok st' ->
+               { m with
+                 screen =
+                   Playing_online { game_id; me_color = online.me_color; state = st' }
+               ; path = []
+               ; pending_save = Some st'
+               }
+             | Error _ -> { m with path = [] })))
+    | Confirm_path, _, _ -> m
+    | Lobby_refreshed l, Waiting _, _ ->
+      (* no blocking fetch here; poll loop will fetch game state when started *)
+      { m with
+        screen =
+          Waiting
+            { lobby = l
+            ; me_index = Option.value_exn (Option.map m.online ~f:(fun o -> o.me_index))
+            }
+      }
+    | Lobby_refreshed _, _, _ -> m
+    | Game_refreshed None, Playing_online _, _ -> m
+    | Game_refreshed (Some st), Playing_online cur, _ ->
+      (match Game_state.equal st cur.state with
+       | true -> m
+       | false -> { m with screen = Playing_online { cur with state = st } })
+    | Game_refreshed _, _, _ -> m
+    | Clear_pending_save, _, _ -> { m with pending_save = None }
   ;;
 
-  let landing ~(inject : Action.t -> unit Ui_effect.t) : Vdom.Node.t =
-    let cell lbl n extra_classes =
+  let landing ~(inject : Action.t -> unit Ui_effect.t) =
+    let cell lbl n extra =
       Vdom.Node.div
         ~attrs:
-          [ Vdom.Attr.classes ("landing__cell" :: extra_classes)
-          ; Vdom.Attr.on_click (fun _ -> inject (Start_game n))
+          [ Vdom.Attr.classes ("landing__cell" :: extra)
+          ; Vdom.Attr.on_click (fun _ -> inject (Action.Start_game n))
           ]
         [ Vdom.Node.div
             ~attrs:[ Vdom.Attr.class_ "landing__label" ]
@@ -172,11 +617,11 @@ module Ui = struct
       ]
   ;;
 
-  let playing_view
-        (st : Game_state.t)
-        (path : Cell_position.t list)
+  let render_board
+        ~(st : Game_state.t)
+        ~(path : Cell_position.t list)
         ~(inject : Action.t -> unit Ui_effect.t)
-    : Vdom.Node.t
+        ~(restrict_to : Player_kind.t option)
     =
     let cells = Map.to_alist st.board in
     let bounds = Layout.uniform_bounds cells in
@@ -194,12 +639,12 @@ module Ui = struct
       | [] -> None, None
     in
     let can_confirm =
-      if List.length path >= 2
-      then (
-        match Game_state.is_move_valid st path with
-        | Ok () -> true
-        | Error _ -> false)
-      else false
+      match List.length path >= 2 with
+      | false -> false
+      | true ->
+        (match Game_state.is_move_valid st path with
+         | Ok () -> true
+         | Error _ -> false)
     in
     let turn_class =
       match st.decision with
@@ -220,20 +665,23 @@ module Ui = struct
         | None -> Vdom.Node.none
         | Some who ->
           let selectable =
-            match st.decision, path with
-            | Decision.In_progress { whose_turn }, []
+            match st.decision, path, restrict_to with
+            | Decision.In_progress { whose_turn }, [], None
               when Player_kind.equal whose_turn who ->
-              [ Vdom.Attr.on_click (fun _ -> inject (Select_start pos)) ]
+              [ Vdom.Attr.on_click (fun _ -> inject (Action.Select_start pos)) ]
+            | Decision.In_progress { whose_turn }, [], Some mine
+              when Player_kind.equal whose_turn who && Player_kind.equal who mine ->
+              [ Vdom.Attr.on_click (fun _ -> inject (Action.Select_start pos)) ]
             | _ -> []
           in
-          if is_path_start
-          then Vdom.Node.none
-          else
-            Vdom.Node.div
-              ~attrs:
-                (Vdom.Attr.classes [ "piece"; "piece--" ^ class_of_player who ]
-                 :: selectable)
-              []
+          (match is_path_start with
+           | true -> Vdom.Node.none
+           | false ->
+             Vdom.Node.div
+               ~attrs:
+                 (Vdom.Attr.classes [ "piece"; "piece--" ^ class_of_player who ]
+                  :: selectable)
+               [])
       in
       let moving_piece =
         match moving_owner, moving_head with
@@ -247,14 +695,19 @@ module Ui = struct
         | _ -> Vdom.Node.none
       in
       let dest_click_attr =
-        if is_next pos
-        then Vdom.Attr.on_click (fun _ -> inject (Extend_path pos))
-        else Vdom.Attr.empty
+        match is_next pos with
+        | true -> Vdom.Attr.on_click (fun _ -> inject (Action.Extend_path pos))
+        | false -> Vdom.Attr.empty
       in
-      let cell_classes =
+      let classes =
         [ "cell" ]
-        @ (if alt then [ "cell--alt" ] else [])
-        @ if is_next pos then [ "cell--next" ] else []
+        @ (match alt with
+           | true -> [ "cell--alt" ]
+           | false -> [])
+        @
+        match is_next pos with
+        | true -> [ "cell--next" ]
+        | false -> []
       in
       let style =
         Css_gen.(
@@ -264,7 +717,7 @@ module Ui = struct
           @> height (`Percent (Percent.of_percentage cell_h)))
       in
       Vdom.Node.div
-        ~attrs:[ Vdom.Attr.classes cell_classes; Vdom.Attr.style style; dest_click_attr ]
+        ~attrs:[ Vdom.Attr.classes classes; Vdom.Attr.style style; dest_click_attr ]
         [ base_piece; moving_piece ]
     in
     let hud =
@@ -279,14 +732,15 @@ module Ui = struct
                   ~attrs:
                     ([ Vdom.Attr.class_ "btn btn--confirm" ]
                      @
-                     if can_confirm
-                     then [ Vdom.Attr.on_click (fun _ -> inject Confirm_path) ]
-                     else [ Vdom.Attr.create "disabled" "" ])
+                     match can_confirm with
+                     | true ->
+                       [ Vdom.Attr.on_click (fun _ -> inject Action.Confirm_path) ]
+                     | false -> [ Vdom.Attr.create "disabled" "" ])
                   [ Vdom.Node.text "Confirm" ]
               ; Vdom.Node.button
                   ~attrs:
                     [ Vdom.Attr.class_ "btn btn--cancel"
-                    ; Vdom.Attr.on_click (fun _ -> inject Cancel_path)
+                    ; Vdom.Attr.on_click (fun _ -> inject Action.Cancel_path)
                     ]
                   [ Vdom.Node.text "Cancel" ]
               ]
@@ -311,19 +765,171 @@ module Ui = struct
       ]
   ;;
 
-  let view (model : Model.t) ~(inject : Action.t -> unit Ui_effect.t) : Vdom.Node.t =
-    match model.screen with
+  let waiting_view ~(lobby : Firebase.Lobby.t) ~me_index =
+    let who =
+      match List.nth lobby.players me_index with
+      | None -> "You"
+      | Some s -> s
+    in
+    Vdom.Node.div
+      [ Vdom.Node.h2 [ Vdom.Node.text "Quick Match" ]
+      ; Vdom.Node.div [ Vdom.Node.text (Printf.sprintf "Game ID: %s" lobby.game_id) ]
+      ; Vdom.Node.div
+          [ Vdom.Node.text
+              (Printf.sprintf "Players: %d/%d" (List.length lobby.players) lobby.capacity)
+          ]
+      ; Vdom.Node.ul
+          (List.map lobby.players ~f:(fun p -> Vdom.Node.li [ Vdom.Node.text p ]))
+      ; Vdom.Node.div [ Vdom.Node.text (Printf.sprintf "You are %s" who) ]
+      ; Vdom.Node.div [ Vdom.Node.text "Waiting for opponents..." ]
+      ]
+  ;;
+
+  let view (m : Model.t) ~(inject : Action.t -> unit Ui_effect.t) =
+    match m.screen with
     | Landing -> landing ~inject
-    | Playing st -> playing_view st model.path ~inject
+    | Waiting { lobby; me_index } -> waiting_view ~lobby ~me_index
+    | Playing_offline st -> render_board ~st ~path:m.path ~inject ~restrict_to:None
+    | Playing_online { state; me_color; _ } ->
+      render_board ~st:state ~path:m.path ~inject ~restrict_to:(Some me_color)
   ;;
 
   let component () =
     let%sub model, set_model = Bonsai.state (module Model) ~default_model:initial_model in
+    let%sub on_start_click =
+      let%arr set_model = set_model
+      and model = model in
+      fun players ->
+        let open Vdom.Effect.Let_syntax in
+        let%bind res =
+          Bonsai_web.Effect.of_deferred_fun
+            (fun n -> Quickplay.join_or_create ~capacity:n)
+            players
+        in
+        match res with
+        | Error _ -> Vdom.Effect.Ignore
+        | Ok (lobby, me_index) ->
+          let me_color = Quickplay.color_of_index me_index in
+          let online =
+            Online.
+              { game_id = lobby.game_id; me_index; capacity = lobby.capacity; me_color }
+          in
+          let m' =
+            { model with
+              screen = Screen.Waiting { lobby; me_index }
+            ; online = Some online
+            ; path = []
+            }
+          in
+          set_model m'
+    in
+    let%sub poll_lobby =
+      let%arr model = model
+      and set_model = set_model in
+      match model.screen, model.online with
+      | Waiting { lobby; _ }, _ ->
+        let open Vdom.Effect.Let_syntax in
+        let%bind res =
+          Bonsai_web.Effect.of_deferred_fun
+            (fun gid -> Firebase.Lobby.get ~game_id:gid)
+            lobby.game_id
+        in
+        (match res with
+         | Ok l' ->
+           (* try to flip to started if capacity reached *)
+           let%bind () =
+             Bonsai_web.Effect.of_deferred_fun (fun l -> Quickplay.start_if_full l) l'
+           in
+           (* if lobby has started, fetch game state and transition; otherwise just refresh lobby *)
+           if String.equal l'.status "started"
+           then (
+             let%bind gs =
+               Bonsai_web.Effect.of_deferred_fun
+                 (fun gid -> Firebase.Game_doc.get ~game_id:gid)
+                 l'.game_id
+             in
+             match gs with
+             | Ok { game_id = _; state = Some st } ->
+               let online = Option.value_exn model.online in
+               set_model
+                 { model with
+                   screen =
+                     Playing_online
+                       { game_id = l'.game_id; me_color = online.me_color; state = st }
+                 }
+             | _ ->
+               (* game state not persisted yet; keep waiting UI updated *)
+               set_model (apply_action model (Action.Lobby_refreshed l')))
+           else set_model (apply_action model (Action.Lobby_refreshed l'))
+         | Error _ -> Vdom.Effect.Ignore)
+      | _, _ -> Vdom.Effect.Ignore
+    in
+    let%sub poll_game =
+      let%arr model = model
+      and set_model = set_model in
+      match model.screen with
+      | Playing_online { game_id; _ } ->
+        let open Vdom.Effect.Let_syntax in
+        let%bind res =
+          Bonsai_web.Effect.of_deferred_fun
+            (fun gid -> Firebase.Game_doc.get ~game_id:gid)
+            game_id
+        in
+        (match res with
+         | Ok { state = Some st; _ } ->
+           set_model (apply_action model (Action.Game_refreshed (Some st)))
+         | Ok { state = None; _ } -> Vdom.Effect.Ignore
+         | Error _ -> Vdom.Effect.Ignore)
+      | _ -> Vdom.Effect.Ignore
+    in
+    let%sub flush_pending_save =
+      let%arr model = model
+      and set_model = set_model in
+      match model.pending_save, model.online with
+      | Some st, Some online ->
+        let open Vdom.Effect.Let_syntax in
+        let%bind _ =
+          Bonsai_web.Effect.of_deferred_fun
+            (fun (gid, st) -> Firebase.Game_doc.save ~game_id:gid ~state:st)
+            (online.game_id, st)
+        in
+        set_model (apply_action model Action.Clear_pending_save)
+      | _ -> Vdom.Effect.Ignore
+    in
+    let%sub () =
+      let%sub () =
+        Bonsai.Clock.every
+          ~when_to_start_next_effect:`Every_multiple_of_period_blocking
+          (Time_ns.Span.of_sec 0.8)
+          poll_lobby
+      in
+      Bonsai.const ()
+    in
+    let%sub () =
+      let%sub () =
+        Bonsai.Clock.every
+          ~when_to_start_next_effect:`Every_multiple_of_period_blocking
+          (Time_ns.Span.of_sec 0.5)
+          poll_game
+      in
+      Bonsai.const ()
+    in
+    let%sub () =
+      let%sub () =
+        Bonsai.Clock.every
+          ~when_to_start_next_effect:`Every_multiple_of_period_blocking
+          (Time_ns.Span.of_sec 0.2)
+          flush_pending_save
+      in
+      Bonsai.const ()
+    in
     let%arr model = model
-    and set_model = set_model in
+    and set_model = set_model
+    and on_start_click = on_start_click in
     let inject (a : Action.t) =
-      let next = apply_action model a in
-      set_model next
+      match a with
+      | Action.Start_game n -> on_start_click n
+      | _ -> set_model (apply_action model a)
     in
     view model ~inject
   ;;
