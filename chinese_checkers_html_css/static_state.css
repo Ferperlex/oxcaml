@@ -266,3 +266,15 @@ body {
   color: #f9fafb;
   text-shadow: 0 10px 40px rgba(0,0,0,0.55);
 }
+
+/* Waiting (lobby) text: white + Helvetica */
+.waiting {
+  color: #ffffff;
+  font-family: Helvetica, Arial, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  line-height: 1.35;
+}
+.waiting h2 {
+  margin: 0 0 .5rem;
+  font-weight: 800;
+}
+.waiting ul { margin: .25rem 0 .5rem; padding-left: 1.1rem; }

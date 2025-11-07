@@ -500,6 +500,17 @@ module Ui = struct
     | F -> "Red"
   ;;
 
+  let me_badge (me_color : Player_kind.t) =
+    let who_name = color_name_of_player me_color in
+    Vdom.Node.div
+      ~attrs:[ Vdom.Attr.classes [ "me-badge"; "me-badge--" ^ class_of_player me_color ] ]
+      [ Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "me-badge__dot" ] []
+      ; Vdom.Node.span
+          ~attrs:[ Vdom.Attr.class_ "me-badge__text" ]
+          [ Vdom.Node.text ("You: " ^ who_name) ]
+      ]
+  ;;
+
   let apply_action (m : Model.t) (a : Action.t) : Model.t =
     match a, m.screen, m.online with
     | Start_game _, _, _ -> m
@@ -763,6 +774,7 @@ module Ui = struct
       ]
   ;;
 
+  (* was: Vdom.Node.div [ ... ] *)
   let waiting_view ~(lobby : Firebase.Lobby.t) ~me_index =
     let who =
       match List.nth lobby.players me_index with
@@ -770,6 +782,7 @@ module Ui = struct
       | Some s -> s
     in
     Vdom.Node.div
+      ~attrs:[ Vdom.Attr.class_ "waiting" ]
       [ Vdom.Node.h2 [ Vdom.Node.text "Quick Match" ]
       ; Vdom.Node.div [ Vdom.Node.text (Printf.sprintf "Game ID: %s" lobby.game_id) ]
       ; Vdom.Node.div
@@ -784,12 +797,24 @@ module Ui = struct
   ;;
 
   let view (m : Model.t) ~(inject : Action.t -> unit Ui_effect.t) =
+    let badge_opt =
+      match m.online with
+      | Some { me_color; _ } -> Some (me_badge me_color)
+      | None -> None
+    in
     match m.screen with
     | Landing -> landing ~inject
-    | Waiting { lobby; me_index } -> waiting_view ~lobby ~me_index
+    | Waiting { lobby; me_index } ->
+      let content = waiting_view ~lobby ~me_index in
+      (match badge_opt with
+       | Some b -> Vdom.Node.div [ content; b ]
+       | None -> content)
     | Playing_offline st -> render_board ~st ~path:m.path ~inject ~restrict_to:None
     | Playing_online { state; me_color; _ } ->
-      render_board ~st:state ~path:m.path ~inject ~restrict_to:(Some me_color)
+      let board =
+        render_board ~st:state ~path:m.path ~inject ~restrict_to:(Some me_color)
+      in
+      Vdom.Node.div [ board; me_badge me_color ]
   ;;
 
   let component () =
