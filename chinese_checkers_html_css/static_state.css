@@ -41,7 +41,7 @@ body {
 
   /* subtle neutral for cells (board wells) */
   --well: #d8dee9;
-  --well-alt: #cfd6e2;
+  --well-alt: #bbc4d7 ;
 
   /* hint fill inside the wells for “next step” */
   --hint: #111827; /* near-black so it reads across tints */
