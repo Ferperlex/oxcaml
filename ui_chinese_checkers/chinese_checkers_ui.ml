@@ -915,7 +915,7 @@ module Ui = struct
     let%sub () =
       let%sub () =
         Bonsai.Clock.every
-          ~when_to_start_next_effect:`Every_multiple_of_period_blocking
+          ~when_to_start_next_effect:`Every_multiple_of_period_non_blocking
           (Time_ns.Span.of_sec 0.8)
           poll_lobby
       in
@@ -924,7 +924,7 @@ module Ui = struct
     let%sub () =
       let%sub () =
         Bonsai.Clock.every
-          ~when_to_start_next_effect:`Every_multiple_of_period_blocking
+          ~when_to_start_next_effect:`Every_multiple_of_period_non_blocking
           (Time_ns.Span.of_sec 0.5)
           poll_game
       in
@@ -933,7 +933,7 @@ module Ui = struct
     let%sub () =
       let%sub () =
         Bonsai.Clock.every
-          ~when_to_start_next_effect:`Every_multiple_of_period_blocking
+          ~when_to_start_next_effect:`Every_multiple_of_period_non_blocking
           (Time_ns.Span.of_sec 0.2)
           flush_pending_save
       in
