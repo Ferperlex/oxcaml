@@ -278,3 +278,47 @@ body {
   font-weight: 800;
 }
 .waiting ul { margin: .25rem 0 .5rem; padding-left: 1.1rem; }
+
+/* Waiting screen typography */
+.waiting {
+  color: #ffffff;
+  font-family: Helvetica, Arial, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  display: grid;
+  gap: 0.5rem;
+  place-items: start;
+}
+
+/* Bottom-right "you are" badge */
+.me-badge {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 20;
+  pointer-events: none;         /* never blocks board clicks */
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.9);  /* #111827 with opacity */
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  font-family: Helvetica, Arial, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+}
+
+.me-badge__dot {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  box-shadow: inset 0 2px 6px rgba(255,255,255,0.35);
+}
+
+/* color the dot by your player */
+.me-badge--A .me-badge__dot { background: var(--color-A); }
+.me-badge--B .me-badge__dot { background: var(--color-B); }
+.me-badge--C .me-badge__dot { background: var(--color-C); }
+.me-badge--D .me-badge__dot { background: var(--color-D); }
+.me-badge--E .me-badge__dot { background: var(--color-E); }
+.me-badge--F .me-badge__dot { background: var(--color-F); }

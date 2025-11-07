@@ -500,14 +500,11 @@ module Ui = struct
     | F -> "Red"
   ;;
 
-  let me_badge (me_color : Player_kind.t) =
-    let who_name = color_name_of_player me_color in
+  let me_badge (who : Player_kind.t) =
     Vdom.Node.div
-      ~attrs:[ Vdom.Attr.classes [ "me-badge"; "me-badge--" ^ class_of_player me_color ] ]
-      [ Vdom.Node.div ~attrs:[ Vdom.Attr.class_ "me-badge__dot" ] []
-      ; Vdom.Node.span
-          ~attrs:[ Vdom.Attr.class_ "me-badge__text" ]
-          [ Vdom.Node.text ("You: " ^ who_name) ]
+      ~attrs:[ Vdom.Attr.class_ ("me-badge me-badge--" ^ class_of_player who) ]
+      [ Vdom.Node.span ~attrs:[ Vdom.Attr.class_ "me-badge__dot" ] []
+      ; Vdom.Node.text ("You: " ^ color_name_of_player who)
       ]
   ;;
 
@@ -782,7 +779,7 @@ module Ui = struct
       | Some s -> s
     in
     Vdom.Node.div
-      ~attrs:[ Vdom.Attr.class_ "waiting" ]
+      ~attrs:[ Vdom.Attr.class_ "waiting" ] (* add this *)
       [ Vdom.Node.h2 [ Vdom.Node.text "Quick Match" ]
       ; Vdom.Node.div [ Vdom.Node.text (Printf.sprintf "Game ID: %s" lobby.game_id) ]
       ; Vdom.Node.div
