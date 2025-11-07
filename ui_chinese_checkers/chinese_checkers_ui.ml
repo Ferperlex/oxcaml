@@ -94,23 +94,8 @@ module Firebase = struct
     (* single-document endpoints *)
     let lobby_doc id = Printf.sprintf "%s/lobby/%s?key=%s" base id key
     let game_doc id = Printf.sprintf "%s/game-state/%s?key=%s" base id key
-
-    (* PATCH upsert endpoints with explicit update masks *)
-    let lobby_upsert id =
-      Printf.sprintf
-        "%s/lobby/%s?key=%s&updateMask.fieldPaths=game_id&updateMask.fieldPaths=capacity&updateMask.fieldPaths=players&updateMask.fieldPaths=status&updateMask.fieldPaths=created_at"
-        base
-        id
-        key
-    ;;
-
-    let game_upsert id =
-      Printf.sprintf
-        "%s/game-state/%s?key=%s&updateMask.fieldPaths=game_id&updateMask.fieldPaths=state&updateMask.fieldPaths=created_at"
-        base
-        id
-        key
-    ;;
+    let lobby_create id = Printf.sprintf "%s/lobby?documentId=%s&key=%s" base id key
+    let game_create id = Printf.sprintf "%s/game-state?documentId=%s&key=%s" base id key
   end
 
   module Http = struct
@@ -282,7 +267,7 @@ module Firebase = struct
     let create ~(game_id : string) ~(capacity : int) ~(first_player : string) =
       let body = encode_create ~game_id ~capacity ~first_player in
       let%bind.Deferred status, _resp =
-        Http.request ~meth:`PATCH ~url:(Config.lobby_upsert game_id) ~body ()
+        Http.request ~meth:`POST ~url:(Config.lobby_create game_id) ~body ()
       in
       match status with
       | s when s >= 200 && s < 300 -> get ~game_id
@@ -349,7 +334,7 @@ module Firebase = struct
     let create ~(game_id : string) ~(initial : Game_state.t) =
       let body = encode_create ~game_id ~initial in
       let%bind.Deferred status, _resp =
-        Http.request ~meth:`PATCH ~url:(Config.game_upsert game_id) ~body ()
+        Http.request ~meth:`POST ~url:(Config.game_create game_id) ~body ()
       in
       match status with
       | s when s >= 200 && s < 300 -> Async_kernel.return (Ok ())
