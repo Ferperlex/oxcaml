@@ -112,7 +112,6 @@ module Firebase = struct
     ;;
 
     let request ~(meth : method_) ~(url : string) ?(body : string option) () =
-      let open Async_kernel in
       Deferred.create (fun ivar ->
         let xhr = XmlHttpRequest.create () in
         xhr##_open (to_js meth) (Js.string url) Js._true;
@@ -492,8 +491,8 @@ module Ui = struct
   ;;
 
   let color_name_of_player = function
-    | Player_kind.A -> "Blue"
-    | B -> "Orange"
+    | Player_kind.A -> "Orange"
+    | B -> "Blue"
     | C -> "Green"
     | D -> "Black"
     | E -> "Purple"
@@ -848,8 +847,7 @@ module Ui = struct
       and set_model = set_model in
       match model.screen, model.online with
       | Waiting { lobby; _ }, _ ->
-        let open Vdom.Effect.Let_syntax in
-        let%bind res =
+        let%bind.Vdom.Effect res =
           Bonsai_web.Effect.of_deferred_fun
             (fun gid -> Firebase.Lobby.get ~game_id:gid)
             lobby.game_id
@@ -857,13 +855,13 @@ module Ui = struct
         (match res with
          | Ok l' ->
            (* try to flip to started if capacity reached *)
-           let%bind () =
+           let%bind.Vdom.Effect () =
              Bonsai_web.Effect.of_deferred_fun (fun l -> Quickplay.start_if_full l) l'
            in
            (* if lobby has started, fetch game state and transition; otherwise just refresh lobby *)
            if String.equal l'.status "started"
            then (
-             let%bind gs =
+             let%bind.Vdom.Effect gs =
                Bonsai_web.Effect.of_deferred_fun
                  (fun gid -> Firebase.Game_doc.get ~game_id:gid)
                  l'.game_id
@@ -889,8 +887,7 @@ module Ui = struct
       and set_model = set_model in
       match model.screen with
       | Playing_online { game_id; _ } ->
-        let open Vdom.Effect.Let_syntax in
-        let%bind res =
+        let%bind.Vdom.Effect res =
           Bonsai_web.Effect.of_deferred_fun
             (fun gid -> Firebase.Game_doc.get ~game_id:gid)
             game_id
@@ -907,8 +904,7 @@ module Ui = struct
       and set_model = set_model in
       match model.pending_save, model.online with
       | Some st, Some online ->
-        let open Vdom.Effect.Let_syntax in
-        let%bind _ =
+        let%bind.Vdom.Effect _ =
           Bonsai_web.Effect.of_deferred_fun
             (fun (gid, st) -> Firebase.Game_doc.save ~game_id:gid ~state:st)
             (online.game_id, st)
