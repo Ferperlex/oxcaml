@@ -282,7 +282,7 @@ module Firebase = struct
     let create ~(game_id : string) ~(capacity : int) ~(first_player : string) =
       let body = encode_create ~game_id ~capacity ~first_player in
       let%bind.Deferred status, _resp =
-        Http.request ~meth:`POST ~url:(Config.lobby_upsert game_id) ~body ()
+        Http.request ~meth:`PATCH ~url:(Config.lobby_upsert game_id) ~body ()
       in
       match status with
       | s when s >= 200 && s < 300 -> get ~game_id
@@ -349,7 +349,7 @@ module Firebase = struct
     let create ~(game_id : string) ~(initial : Game_state.t) =
       let body = encode_create ~game_id ~initial in
       let%bind.Deferred status, _resp =
-        Http.request ~meth:`POST ~url:(Config.game_upsert game_id) ~body ()
+        Http.request ~meth:`PATCH ~url:(Config.game_upsert game_id) ~body ()
       in
       match status with
       | s when s >= 200 && s < 300 -> Async_kernel.return (Ok ())
